@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>KAM PDFs</title>
+<link rel="icon" type="image/svg+xml" href="logo.svg">
+<script src="lib/pdf.min.js"></script>
+<script src="lib/pdf-lib.min.js"></script>
+<style>
+*{box-sizing:border-box}
+html,body{height:100%;margin:0;font:13px/1.4 system-ui,"Segoe UI",Roboto,sans-serif;background:#1e1f24;color:#e6e6ea;overflow:hidden}
+button{font:inherit;color:inherit;background:#2c2d34;border:1px solid #3d3e47;border-radius:6px;padding:5px 10px;cursor:pointer;white-space:nowrap}
+button:hover{background:#383943}
+button.primary{background:#f5b400;border-color:#f5b400;color:#111;font-weight:600}
+button.primary:hover{background:#ffc61a}
+button.active{background:#f5b400;border-color:#f5b400;color:#111;font-weight:600}
+button:disabled{opacity:.4;cursor:default}
+input,select,textarea{font:inherit;color:inherit;background:#15161a;border:1px solid #3d3e47;border-radius:6px;padding:4px 6px}
+input[type=color]{padding:0;width:30px;height:26px;background:none;border:none;cursor:pointer}
+input[type=checkbox]{accent-color:#f5b400}
+#topbar{display:flex;align-items:center;gap:14px;padding:8px 12px;background:#26272e;border-bottom:1px solid #3d3e47;height:48px}
+.brand{font-weight:800;font-size:16px;margin-right:6px;white-space:nowrap;display:flex;align-items:center;gap:8px;color:#f5b400;letter-spacing:.5px}
+.brand img{width:30px;height:30px}
+.brand span{color:#e6e6ea;font-weight:500}
+.group{display:flex;align-items:center;gap:6px}
+.group.right{margin-left:auto}
+#main{display:flex;height:calc(100% - 48px)}
+#sidebar{width:200px;background:#26272e;border-right:1px solid #3d3e47;display:flex;flex-direction:column;flex-shrink:0}
+.side-head{padding:8px 10px;border-bottom:1px solid #3d3e47;font-weight:600}
+.side-actions{display:flex;gap:3px;margin-top:6px;flex-wrap:wrap}
+.side-actions button{padding:3px 7px;font-size:13px}
+#thumbs{flex:1;overflow:auto;padding:10px}
+.thumb{margin:0 auto 10px;cursor:pointer;text-align:center;border:2px solid transparent;border-radius:6px;padding:4px;position:relative;user-select:none}
+.thumb.current{border-color:#f5b400}
+.thumb.selected{background:#3a3320}
+.thumb canvas{display:block;margin:0 auto;background:#fff;box-shadow:0 1px 4px rgba(0,0,0,.5);width:140px;height:auto}
+.thumb .num{font-size:11px;color:#aaa;margin-top:3px}
+.thumb.dragover{border-color:#f59e0b}
+#viewer{flex:1;display:flex;flex-direction:column;min-width:0;position:relative}
+#toolbar{display:flex;align-items:center;gap:6px;padding:6px 10px;background:#26272e;border-bottom:1px solid #3d3e47;flex-wrap:wrap}
+#toolbar .sep{width:1px;height:24px;background:#3d3e47;margin:0 4px}
+#tools button{padding:5px 8px}
+#props{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+#props label{display:none;align-items:center;gap:4px;font-size:12px;color:#bbb}
+#props label.on{display:flex}
+#props input[type=number]{width:58px}
+#props input[type=range]{width:80px}
+#viewport{flex:1;overflow:auto;background:#121317;position:relative;padding:20px}
+#pageWrap{position:relative;margin:0 auto;box-shadow:0 2px 12px rgba(0,0,0,.6);background:#fff;width:0;height:0}
+#pageCanvas,#overlay{position:absolute;left:0;top:0}
+#overlay{touch-action:none}
+#textEditor{position:absolute;display:none;background:rgba(255,255,255,.6);border:1px dashed #f5b400;padding:0;margin:0;resize:none;overflow:hidden;color:#000;outline:none;line-height:1.2;min-width:30px;white-space:pre;border-radius:0;transform-origin:0 0}
+#pager{display:flex;align-items:center;justify-content:center;gap:8px;padding:6px;background:#26272e;border-top:1px solid #3d3e47}
+#pager input{width:54px;text-align:center}
+#rightpanel{width:270px;background:#26272e;border-left:1px solid #3d3e47;display:flex;flex-direction:column;flex-shrink:0}
+.tabs{display:flex;border-bottom:1px solid #3d3e47}
+.tabs button{flex:1;border:none;border-radius:0;background:none;padding:9px}
+.tabs button.active{background:#1e1f24;border-bottom:2px solid #f5b400;color:#fff}
+.tab{display:none;padding:12px;overflow:auto;flex:1}
+.tab.active{display:block}
+.tab h4{margin:16px 0 6px;font-size:11px;text-transform:uppercase;letter-spacing:.6px;color:#999}
+.tab h4:first-child{margin-top:0}
+.field{display:flex;flex-direction:column;gap:3px;margin-bottom:8px}
+.field label{font-size:12px;color:#bbb}
+.field input,.field select,.field textarea{width:100%}
+.row{display:flex;gap:6px;align-items:center;margin-bottom:8px;flex-wrap:wrap}
+.muted{color:#888;font-size:12px}
+#drop{position:fixed;inset:0;background:rgba(245,180,0,.18);border:4px dashed #f5b400;display:none;align-items:center;justify-content:center;font-size:28px;z-index:50;pointer-events:none}
+#drop.show{display:flex}
+#empty{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;color:#888;font-size:15px}
+#empty.hide{display:none}
+#empty button{font-size:15px;padding:10px 18px}
+#modal{position:fixed;inset:0;background:rgba(0,0,0,.6);display:none;align-items:center;justify-content:center;z-index:60}
+#modal.show{display:flex}
+#modalBox{background:#26272e;border:1px solid #3d3e47;border-radius:10px;padding:16px;min-width:380px;max-width:85vw;max-height:85vh;overflow:auto}
+#modalBox h3{margin:0 0 10px}
+#modalBox textarea{width:100%;min-height:260px;font-family:ui-monospace,Consolas,monospace;font-size:12px}
+#sigPad{background:#fff;border-radius:6px;touch-action:none;display:block;cursor:crosshair}
+#toast{position:fixed;bottom:50px;left:50%;transform:translateX(-50%);background:#333;border:1px solid #555;padding:8px 14px;border-radius:8px;display:none;z-index:70;box-shadow:0 2px 10px rgba(0,0,0,.5);max-width:80vw}
+#busy{position:fixed;inset:0;background:rgba(0,0,0,.45);display:none;align-items:center;justify-content:center;z-index:80;font-size:16px}
+#busy.show{display:flex}
+kbd{background:#15161a;border:1px solid #444;border-radius:4px;padding:0 4px;font-size:11px}
+</style>
+</head>
+<body>
+<header id="topbar">
+  <div class="brand"><img src="logo.svg" alt="KAM logo"> KAM <span>PDFs</span></div>
+  <div class="group">
+    <button id="btnOpen" title="Open a PDF (Ctrl+O)">📂 Open</button>
+    <button id="btnNew" title="Create a new blank document">New</button>
+    <button id="btnMerge" title="Append pages from other PDFs">Merge PDF…</button>
+    <button id="btnAddImages" title="Add images as new pages">Images → pages</button>
+  </div>
+  <div class="group">
+    <button id="btnUndo" title="Undo (Ctrl+Z)">↶ Undo</button>
+  </div>
+  <div class="group">
+    <button id="btnSave" class="primary" title="Download the edited PDF (Ctrl+S)">⬇ Save PDF</button>
+    <button id="btnPrint">🖨 Print</button>
+  </div>
+  <div class="group right">
+    <button id="btnZoomOut">−</button><span id="zoomLabel" style="min-width:44px;text-align:center">100%</span><button id="btnZoomIn">+</button><button id="btnFit">Fit width</button>
+  </div>
+</header>
+<div id="main">
+  <aside id="sidebar">
+    <div class="side-head">Pages <span id="pageCountLabel" class="muted"></span>
+      <div class="side-actions">
+        <button data-act="rotL" title="Rotate left">⟲</button>
+        <button data-act="rotR" title="Rotate right">⟳</button>
+        <button data-act="dup" title="Duplicate page">⧉</button>
+        <button data-act="blank" title="Insert blank page after">＋</button>
+        <button data-act="extract" title="Extract selected pages to a new PDF">⤴</button>
+        <button data-act="del" title="Delete page(s)">🗑</button>
+      </div>
+      <div class="muted" style="font-weight:400;margin-top:4px;font-size:11px">Click to select · Ctrl/Shift+click for multiple · drag to reorder</div>
+    </div>
+    <div id="thumbs"></div>
+  </aside>
+  <section id="viewer">
+    <div id="toolbar">
+      <div id="tools" class="group">
+        <button data-tool="select" title="Select / move (V)">↖ Select</button>
+        <button data-tool="text" title="Add text (T)">T Text</button>
+        <button data-tool="pen" title="Freehand pen (P)">✎ Pen</button>
+        <button data-tool="highlight" title="Highlight (H)">🖍 Highlight</button>
+        <button data-tool="rect" title="Rectangle (R)">▭ Rect</button>
+        <button data-tool="ellipse" title="Ellipse (E)">◯ Ellipse</button>
+        <button data-tool="line" title="Line (L)">╱ Line</button>
+        <button data-tool="arrow" title="Arrow (A)">➚ Arrow</button>
+        <button data-tool="whiteout" title="Cover an area with white (W)">▮ Whiteout</button>
+        <button id="btnImage" title="Insert image">🖼 Image</button>
+        <button id="btnSign" title="Draw a signature">✍ Sign</button>
+      </div>
+      <div class="sep"></div>
+      <div id="props">
+        <label data-p="color">Color <input type="color" id="pColor" value="#e11d48"></label>
+        <label data-p="fill">Fill <input type="checkbox" id="pFillOn"> <input type="color" id="pFill" value="#ffff00"></label>
+        <label data-p="width">Width <input type="number" id="pWidth" min="0.5" max="50" step="0.5" value="2"></label>
+        <label data-p="size">Size <input type="number" id="pSize" min="4" max="200" step="1" value="16"></label>
+        <label data-p="font">Font <select id="pFont"><option value="Helvetica">Helvetica</option><option value="TimesRoman">Times</option><option value="Courier">Courier</option></select></label>
+        <label data-p="bold"><input type="checkbox" id="pBold"> Bold</label>
+        <label data-p="opacity">Opacity <input type="range" id="pOpacity" min="0.05" max="1" step="0.05" value="1"></label>
+        <button id="btnDelAnnot" style="display:none" title="Delete selected (Del)">🗑 Delete</button>
+        <span id="hint" class="muted"></span>
+      </div>
+    </div>
+    <div id="viewport">
+      <div id="pageWrap">
+        <canvas id="pageCanvas"></canvas>
+        <canvas id="overlay"></canvas>
+        <textarea id="textEditor" rows="1"></textarea>
+      </div>
+      <div id="empty">
+        <img src="logo.svg" alt="KAM logo" style="width:110px;height:110px;box-shadow:0 4px 24px rgba(245,180,0,.25);border-radius:50%">
+        <div style="font-size:22px;font-weight:800;color:#f5b400;letter-spacing:1px">KAM <span style="color:#e6e6ea;font-weight:500">PDFs</span></div>
+        <div>Open a PDF to get started, or drop one anywhere</div>
+        <div class="group"><button id="btnOpen2" class="primary">Open PDF</button><button id="btnNew2">New blank document</button><button id="btnDemo">Try the demo</button></div>
+        <div class="muted">Free, offline, no sign-up. Files never leave your computer.</div>
+      </div>
+    </div>
+    <div id="pager">
+      <button id="btnPrev">◀</button>
+      <input id="pageNum" type="number" min="1" value="1"> <span id="pageTotal">/ 0</span>
+      <button id="btnNext">▶</button>
+    </div>
+  </section>
+  <aside id="rightpanel">
+    <div class="tabs">
+      <button data-tab="doc" class="active">Document</button>
+      <button data-tab="form">Form fields</button>
+      <button data-tab="help">Help</button>
+    </div>
+    <div class="tab active" id="tab-doc">
+      <h4>Save</h4>
+      <div class="row"><label><input type="checkbox" id="flattenForm"> Flatten form fields (make them non-editable)</label></div>
+      <div class="row"><button id="btnSave2" class="primary">⬇ Save PDF</button><button id="btnPng">Page → PNG</button></div>
+      <h4>Extract / split pages</h4>
+      <div class="row"><input id="extractRange" placeholder="e.g. 1-3, 7, 10-12" style="flex:1"><button id="btnExtract">Extract</button></div>
+      <div class="muted">Saves the listed pages as a separate PDF.</div>
+      <h4>Watermark (all pages)</h4>
+      <div class="row"><input id="wmText" placeholder="CONFIDENTIAL" style="flex:1"><input id="wmOpacity" type="number" min="0.05" max="1" step="0.05" value="0.3" title="Opacity" style="width:60px"><button id="btnWatermark">Add</button></div>
+      <h4>Page numbers (all pages)</h4>
+      <div class="row"><input id="pnFormat" value="Page {n} of {total}" style="flex:1"><select id="pnPos"><option value="bottom">Bottom</option><option value="top">Top</option></select><button id="btnPageNums">Add</button></div>
+      <h4>Text</h4>
+      <div class="row"><button id="btnExtractText">Extract text of this page</button></div>
+      <h4>Metadata</h4>
+      <div class="field"><label>Title</label><input id="mTitle"></div>
+      <div class="field"><label>Author</label><input id="mAuthor"></div>
+      <div class="field"><label>Subject</label><input id="mSubject"></div>
+      <div class="field"><label>Keywords (comma separated)</label><input id="mKeywords"></div>
+      <div class="row"><button id="btnMeta">Apply metadata</button></div>
+    </div>
+    <div class="tab" id="tab-form">
+      <div id="formFields"><div class="muted">Open a PDF with form fields to fill them here.</div></div>
+      <div class="row" id="formActions" style="display:none;margin-top:10px"><button id="btnApplyForm" class="primary">Apply values</button></div>
+    </div>
+    <div class="tab" id="tab-help">
+      <h4>Shortcuts</h4>
+      <div class="muted" style="line-height:1.9">
+        <kbd>V</kbd> select · <kbd>T</kbd> text · <kbd>P</kbd> pen · <kbd>H</kbd> highlight<br>
+        <kbd>R</kbd> rect · <kbd>E</kbd> ellipse · <kbd>L</kbd> line · <kbd>A</kbd> arrow · <kbd>W</kbd> whiteout<br>
+        <kbd>Del</kbd> delete selected · <kbd>Ctrl+Z</kbd> undo · <kbd>Esc</kbd> deselect<br>
+        <kbd>←</kbd>/<kbd>→</kbd> pages · <kbd>Ctrl</kbd>+wheel zoom · <kbd>Ctrl+S</kbd> save
+      </div>
+      <h4>Tips</h4>
+      <div class="muted" style="line-height:1.6">
+        Double-click a text box to edit it. Drag the small square at a box's corner to resize.<br><br>
+        Annotations are drawn on top of the page when you save. Whiteout only covers content visually; the underlying text stays in the file.<br><br>
+        Password-protected PDFs can't be opened. Print them to a new PDF first.
+      </div>
+    </div>
+  </aside>
+</div>
+<div id="drop">Drop PDF or images</div>
+<div id="modal"><div id="modalBox"></div></div>
+<div id="toast"></div>
+<div id="busy">Working…</div>
+<input type="file" id="fileInput" accept="application/pdf,.pdf" hidden>
+<input type="file" id="mergeInput" accept="application/pdf,.pdf" multiple hidden>
+<input type="file" id="imgInput" accept="image/*" multiple hidden>
+<input type="file" id="imgAnnotInput" accept="image/*" hidden>
+<script src="examples/demo.js"></script>
+<script src="core.js"></script>
+<script src="annot.js"></script>
+<script src="ops.js"></script>
+</body>
+</html>
