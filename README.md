@@ -67,6 +67,7 @@ Unzip and open `index.html` in Chrome, Edge, Firefox, or Safari. Everything work
 - Extract the text of a page
 - Export a page as a PNG
 - Print
+- Light and dark mode (the ☀ / 🌙 button, remembered between sessions)
 
 ## Screenshots
 
@@ -81,6 +82,10 @@ Unzip and open `index.html` in Chrome, Edge, Firefox, or Safari. Everything work
 **Pages and drawing.** Landscape pages, thumbnails you can drag to reorder, and the pen tool.
 
 ![Pen tool on a landscape page](screenshots/pages.png)
+
+**Light mode.** One click on the ☀ button.
+
+![Light mode](screenshots/light.png)
 
 ## Try it in 10 seconds
 

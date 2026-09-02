@@ -259,6 +259,17 @@ window.addEventListener('drop', e => {
   e.preventDefault(); handleDroppedFiles([...e.dataTransfer.files]);
 });
 
+/* ---------- light / dark theme ---------- */
+function applyTheme(t) {
+  document.documentElement.setAttribute('data-theme', t);
+  $('#btnTheme').textContent = t === 'light' ? '🌙' : '☀';
+  $('#btnTheme').title = t === 'light' ? 'Switch to dark mode' : 'Switch to light mode';
+  const meta = document.querySelector('meta[name=theme-color]'); if (meta) meta.content = t === 'light' ? '#ffffff' : '#1e1f24';
+  try { localStorage.setItem('kam-theme', t); } catch (e) { }
+}
+applyTheme(document.documentElement.getAttribute('data-theme') || 'dark');
+$('#btnTheme').onclick = () => applyTheme(document.documentElement.getAttribute('data-theme') === 'light' ? 'dark' : 'light');
+
 /* ---------- tabs ---------- */
 $$('.tabs button').forEach(b => b.onclick = () => {
   $$('.tabs button').forEach(x => x.classList.toggle('active', x === b));
