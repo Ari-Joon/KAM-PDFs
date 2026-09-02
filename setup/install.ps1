@@ -53,3 +53,7 @@ if ($browser) { Write-Host "KAM PDFs will open in its own window using $browser"
 else { Write-Host 'No Chrome/Edge found; the shortcut opens index.html in your default browser.' }
 Write-Host ''
 Write-Host 'All set. Look for the KAM PDFs icon on your Desktop and in the Start Menu.'
+Write-Host ''
+Write-Host 'Tip: for the sharpest taskbar icon, open https://ari-joon.github.io/KAM-PDFs/'
+Write-Host 'in Chrome or Edge and click "Install app". Windows takes the taskbar icon from'
+Write-Host 'the page itself in this shortcut mode, so an installed app looks much better.'
