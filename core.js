@@ -14,7 +14,8 @@ const state = {
   annots: {},           // pageId -> [annotation]
   cur: 0,
   selectedPages: new Set(),
-  zoom: 1, fitWidth: true,
+  zoom: 1, fit: 'width',      // 'width' | 'page' | '' (manual)
+  redo: [], dirty: false, clipboard: null,
   tool: 'select',
   selected: null,
   undo: [],             // unified undo stack
@@ -101,9 +102,10 @@ async function renderPage() {
   if (pdf !== state.pdfjs) return;
   const base = page.getViewport({ scale: 1 });
   state.pageSize = { w: base.width, h: base.height };
-  if (state.fitWidth) {
-    const avail = $('#viewport').clientWidth - 42;
-    state.zoom = avail > 100 ? Math.max(0.1, Math.min(8, avail / base.width)) : 1;
+  if (state.fit) {
+    const availW = $('#viewport').clientWidth - 42, availH = $('#viewport').clientHeight - 42;
+    const z = state.fit === 'page' ? Math.min(availW / base.width, availH / base.height) : availW / base.width;
+    state.zoom = availW > 100 ? Math.max(0.1, Math.min(8, z)) : 1;
   }
   const dpr = window.devicePixelRatio || 1;
   const vp = page.getViewport({ scale: state.zoom * dpr });
@@ -209,15 +211,16 @@ async function goTo(i) {
   const t = $(`.thumb[data-i="${i}"]`); if (t) t.scrollIntoView({ block: 'nearest' });
   await renderPage();
 }
-function setZoom(z, fit = false) {
-  state.fitWidth = fit;
+function setZoom(z, fit = '') {
+  state.fit = fit;
   if (!fit) state.zoom = Math.max(0.1, Math.min(8, z));
   commitTextEdit();
   renderPage();
 }
 $('#btnZoomIn').onclick = () => setZoom(state.zoom * 1.25);
 $('#btnZoomOut').onclick = () => setZoom(state.zoom / 1.25);
-$('#btnFit').onclick = () => setZoom(1, true);
+$('#btnFit').onclick = () => setZoom(1, 'width');
+$('#btnFitPage').onclick = () => setZoom(1, 'page');
 $('#btnPrev').onclick = () => goTo(state.cur - 1);
 $('#btnNext').onclick = () => goTo(state.cur + 1);
 $('#pageNum').addEventListener('change', e => goTo(parseInt(e.target.value, 10) - 1));
@@ -226,7 +229,8 @@ $('#viewport').addEventListener('wheel', e => {
   setZoom(state.zoom * (e.deltaY < 0 ? 1.1 : 1 / 1.1));
 }, { passive: false });
 let resizeTimer;
-window.addEventListener('resize', () => { clearTimeout(resizeTimer); resizeTimer = setTimeout(() => { if (state.fitWidth) renderPage(); }, 150); });
+window.addEventListener('resize', () => { clearTimeout(resizeTimer); resizeTimer = setTimeout(() => { if (state.fit) renderPage(); }, 150); });
+window.addEventListener('beforeunload', e => { if (state.dirty) { e.preventDefault(); e.returnValue = ''; } });
 
 /* ---------- file inputs & drag/drop ---------- */
 $('#btnOpen').onclick = $('#btnOpen2').onclick = () => $('#fileInput').click();
@@ -262,7 +266,7 @@ $$('.tabs button').forEach(b => b.onclick = () => {
 });
 
 /* ---------- undo ---------- */
-function pushUndo(entry) { state.undo.push(entry); if (state.undo.length > 25) state.undo.shift(); }
+function pushUndo(entry) { state.undo.push(entry); if (state.undo.length > 25) state.undo.shift(); state.redo = []; state.dirty = true; }
 function snapshotAnnots(pageIds) {
   const pages = {}; for (const id of pageIds) pages[id] = JSON.stringify(state.annots[id] || []);
   return { kind: 'annot', pages };
@@ -275,6 +279,7 @@ async function undo() {
   commitTextEdit();
   const e = state.undo.pop(); if (!e) { toast('Nothing to undo'); return; }
   if (e.kind === 'annot') {
+    state.redo.push(snapshotAnnots(Object.keys(e.pages)));
     for (const id in e.pages) state.annots[id] = JSON.parse(e.pages[id]);
     state.selected = null; drawOverlay(); refreshThumb(state.cur); updateProps();
   } else {
@@ -288,7 +293,15 @@ async function undo() {
     busy(false);
   }
 }
+function redo() {
+  commitTextEdit();
+  const e = state.redo.pop(); if (!e) { toast('Nothing to redo'); return; }
+  state.undo.push(snapshotAnnots(Object.keys(e.pages)));
+  for (const id in e.pages) state.annots[id] = JSON.parse(e.pages[id]);
+  state.selected = null; drawOverlay(); refreshThumb(state.cur); updateProps();
+}
 $('#btnUndo').onclick = undo;
+$('#btnRedo').onclick = redo;
 
 /* ---------- demo document ---------- */
 async function loadDemo() {

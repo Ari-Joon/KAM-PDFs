@@ -303,7 +303,7 @@ async function burnedDoc() {
       } else if (a.type === 'text') {
         const font = await getFont(a);
         const base = toU(a.x - a.size * 0.9 * sin, a.y + a.size * 0.9 * cos);
-        page.drawText(sanitizeForFont(a.text, font), { x: base.x, y: base.y, size: a.size, font, color: hexToRgb(a.color), opacity: op, rotate, lineHeight: a.size * 1.2 });
+        page.drawText(sanitizeForFont((a.lines || [a.text]).join('\n'), font), { x: base.x, y: base.y, size: a.size, font, color: hexToRgb(a.color), opacity: op, rotate, lineHeight: a.size * 1.2 });
       } else if (a.type === 'image') {
         const img = await getImage(a);
         page.drawImage(img, { x: bl.x, y: bl.y, width: a.w, height: a.h, rotate, opacity: op });
@@ -320,7 +320,7 @@ async function exportBytes() {
 async function savePdf() {
   if (!state.doc) return toast('Open a PDF first');
   commitTextEdit(); busy(true);
-  try { downloadBytes(await exportBytes(), outName()); toast('Saved ' + outName()); }
+  try { downloadBytes(await exportBytes(), outName()); state.dirty = false; toast('Saved ' + outName()); }
   catch (e) { console.error(e); toast('Save failed: ' + e.message, 6000); }
   busy(false);
 }

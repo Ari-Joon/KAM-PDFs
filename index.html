@@ -50,7 +50,10 @@ input[type=checkbox]{accent-color:#f5b400}
 #pageWrap{position:relative;margin:0 auto;box-shadow:0 2px 12px rgba(0,0,0,.6);background:#fff;width:0;height:0}
 #pageCanvas,#overlay{position:absolute;left:0;top:0}
 #overlay{touch-action:none}
-#textEditor{position:absolute;display:none;background:rgba(255,255,255,.6);border:1px dashed #f5b400;padding:0;margin:0;resize:none;overflow:hidden;color:#000;outline:none;line-height:1.2;min-width:30px;white-space:pre;border-radius:0;transform-origin:0 0}
+/* High-contrast cursors (black with white outline) so they stay visible on any page */
+#overlay.cur-text{cursor:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='24' height='24'><g fill='none' stroke='white' stroke-width='4.5' stroke-linecap='round'><path d='M8 3h8M12 3v18M8 21h8'/></g><g fill='none' stroke='black' stroke-width='2' stroke-linecap='round'><path d='M8 3h8M12 3v18M8 21h8'/></g></svg>") 12 12, text}
+#overlay.cur-cross{cursor:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='24' height='24'><g stroke='white' stroke-width='4.5' stroke-linecap='round'><path d='M12 2v20M2 12h20'/></g><g stroke='black' stroke-width='2' stroke-linecap='round'><path d='M12 2v20M2 12h20'/></g><circle cx='12' cy='12' r='2.5' fill='%23f5b400'/></svg>") 12 12, crosshair}
+#textEditor{position:absolute;display:none;background:rgba(255,255,255,.85);border:1px dashed #f5b400;padding:0;margin:0;resize:none;overflow:hidden;color:#000;outline:none;line-height:1.2;min-width:30px;white-space:pre;overflow-wrap:break-word;word-break:break-word;border-radius:0;transform-origin:0 0;caret-color:#1d4ed8;box-shadow:0 0 0 1px rgba(255,255,255,.9),0 0 0 2px rgba(245,180,0,.6)}
 #pager{display:flex;align-items:center;justify-content:center;gap:8px;padding:6px;background:#26272e;border-top:1px solid #3d3e47}
 #pager input{width:54px;text-align:center}
 #rightpanel{width:270px;background:#26272e;border-left:1px solid #3d3e47;display:flex;flex-direction:column;flex-shrink:0}
@@ -94,13 +97,14 @@ kbd{background:#15161a;border:1px solid #444;border-radius:4px;padding:0 4px;fon
   </div>
   <div class="group">
     <button id="btnUndo" title="Undo (Ctrl+Z)">↶ Undo</button>
+    <button id="btnRedo" title="Redo (Ctrl+Y)">↷ Redo</button>
   </div>
   <div class="group">
     <button id="btnSave" class="primary" title="Download the edited PDF (Ctrl+S)">⬇ Save PDF</button>
     <button id="btnPrint">🖨 Print</button>
   </div>
   <div class="group right">
-    <button id="btnZoomOut">−</button><span id="zoomLabel" style="min-width:44px;text-align:center">100%</span><button id="btnZoomIn">+</button><button id="btnFit">Fit width</button>
+    <button id="btnZoomOut">−</button><span id="zoomLabel" style="min-width:44px;text-align:center">100%</span><button id="btnZoomIn">+</button><button id="btnFit">Fit width</button><button id="btnFitPage">Fit page</button>
   </div>
 </header>
 <div id="main">
@@ -201,12 +205,13 @@ kbd{background:#15161a;border:1px solid #444;border-radius:4px;padding:0 4px;fon
       <div class="muted" style="line-height:1.9">
         <kbd>V</kbd> select · <kbd>T</kbd> text · <kbd>P</kbd> pen · <kbd>H</kbd> highlight<br>
         <kbd>R</kbd> rect · <kbd>E</kbd> ellipse · <kbd>L</kbd> line · <kbd>A</kbd> arrow · <kbd>W</kbd> whiteout<br>
-        <kbd>Del</kbd> delete selected · <kbd>Ctrl+Z</kbd> undo · <kbd>Esc</kbd> deselect<br>
-        <kbd>←</kbd>/<kbd>→</kbd> pages · <kbd>Ctrl</kbd>+wheel zoom · <kbd>Ctrl+S</kbd> save
+        <kbd>Del</kbd> delete · <kbd>Ctrl+Z</kbd> undo · <kbd>Ctrl+Y</kbd> redo · <kbd>Esc</kbd> deselect<br>
+        <kbd>Ctrl+C</kbd>/<kbd>Ctrl+V</kbd> copy/paste · <kbd>Ctrl+D</kbd> duplicate · arrows nudge (Shift = 10)<br>
+        <kbd>←</kbd>/<kbd>→</kbd> pages · <kbd>Ctrl</kbd>+wheel zoom · <kbd>Ctrl+S</kbd> save · <kbd>Ctrl+P</kbd> print
       </div>
       <h4>Tips</h4>
       <div class="muted" style="line-height:1.6">
-        Double-click a text box to edit it. Drag the small square at a box's corner to resize.<br><br>
+        <b>Text:</b> click to place free text, or drag out a box first and the text wraps to that width. Drag the corner square to change the width. Double-click to edit. Paste an image from the clipboard with Ctrl+V.<br><br>
         Annotations are drawn on top of the page when you save. Whiteout only covers content visually; the underlying text stays in the file.<br><br>
         Password-protected PDFs can't be opened. Print them to a new PDF first.
       </div>

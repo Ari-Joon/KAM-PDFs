@@ -14,10 +14,31 @@ function curPageId() { return state.pageIds[state.cur]; }
 function curAnnots() { const id = curPageId(); if (!state.annots[id]) state.annots[id] = []; return state.annots[id]; }
 function fontFamily(f) { return f === 'TimesRoman' ? '"Times New Roman",Times,serif' : f === 'Courier' ? '"Courier New",Courier,monospace' : 'Helvetica,Arial,sans-serif'; }
 function fontCss(a, s) { return `${a.bold ? 'bold ' : ''}${a.size * s}px ${fontFamily(a.font)}`; }
-function measureText(a) {
+// Break text into lines. With a fixed box width (a.boxW) words wrap automatically.
+function wrapLines(a) {
   measureCtx.font = fontCss(a, 1);
-  const lines = (a.text || ' ').split('\n');
-  a.w = Math.max(10, ...lines.map(l => measureCtx.measureText(l || ' ').width));
+  const out = [];
+  for (const para of (a.text || '').split('\n')) {
+    if (!a.boxW) { out.push(para); continue; }
+    let line = '';
+    for (const w of para.split(' ')) {
+      const test = line ? line + ' ' + w : w;
+      if (measureCtx.measureText(test).width <= a.boxW) { line = test; continue; }
+      if (line) { out.push(line); line = ''; }
+      if (measureCtx.measureText(w).width <= a.boxW) { line = w; continue; }
+      let chunk = '';
+      for (const ch of w) { if (chunk && measureCtx.measureText(chunk + ch).width > a.boxW) { out.push(chunk); chunk = ch; } else chunk += ch; }
+      line = chunk;
+    }
+    out.push(line);
+  }
+  return out.length ? out : [''];
+}
+function measureText(a) {
+  const lines = wrapLines(a); a.lines = lines;
+  measureCtx.font = fontCss(a, 1);
+  const natural = Math.max(10, ...lines.map(l => measureCtx.measureText(l || ' ').width));
+  a.w = a.boxW ? Math.max(10, a.boxW) : natural;
   a.h = lines.length * a.size * 1.2;
 }
 function getImg(a) {
@@ -54,7 +75,7 @@ function drawAnnot(ctx, a, s) {
     if (a.type === 'text') {
       ctx.fillStyle = a.color; ctx.font = fontCss(a, s); ctx.textBaseline = 'alphabetic';
       const lh = a.size * 1.2 * s;
-      a.text.split('\n').forEach((line, i) => ctx.fillText(line, 0, i * lh + a.size * 0.9 * s));
+      (a.lines || a.text.split('\n')).forEach((line, i) => ctx.fillText(line, 0, i * lh + a.size * 0.9 * s));
     } else if (a.type === 'rect') {
       if (a.fill) { ctx.fillStyle = a.fill; ctx.fillRect(0, 0, w, h); }
       if (a.stroke) { ctx.strokeStyle = a.stroke; ctx.lineWidth = a.width * s; ctx.strokeRect(0, 0, w, h); }
@@ -90,7 +111,14 @@ function drawOverlay() {
   const ctx = overlay.getContext('2d');
   ctx.clearRect(0, 0, overlay.width, overlay.height);
   if (!state.pageIds.length) return;
-  drawAnnots(ctx, curPageId(), state.zoom * (window.devicePixelRatio || 1), state.selected);
+  const s = state.zoom * (window.devicePixelRatio || 1);
+  drawAnnots(ctx, curPageId(), s, state.selected);
+  if (drag && drag.mode === 'textbox') {
+    const dpr = window.devicePixelRatio || 1, [sx, sy] = drag.start, [cx, cy] = drag.cur;
+    ctx.save(); ctx.strokeStyle = '#f5b400'; ctx.lineWidth = dpr; ctx.setLineDash([4 * dpr, 3 * dpr]);
+    ctx.strokeRect(Math.min(sx, cx) * s, Math.min(sy, cy) * s, Math.abs(cx - sx) * s, Math.max(defaults.size * 1.2, Math.abs(cy - sy)) * s);
+    ctx.restore();
+  }
 }
 
 /* ---------- hit testing ---------- */
@@ -133,7 +161,7 @@ const propVis = {
 };
 const hints = {
   select: 'Click an annotation to select it. Drag to move, corner square to resize, double-click text to edit.',
-  text: 'Click on the page to place text.', pen: 'Draw freehand.', highlight: 'Drag over text to highlight.',
+  text: 'Click to place text, or drag to draw a fixed-width box that wraps automatically. Enter starts a new line.', pen: 'Draw freehand.', highlight: 'Drag over text to highlight.',
   rect: 'Drag to draw a rectangle.', ellipse: 'Drag to draw an ellipse.', line: 'Drag to draw a line.',
   arrow: 'Drag to draw an arrow.', whiteout: 'Drag to cover an area with white.',
 };
@@ -141,7 +169,7 @@ function setTool(t) {
   commitTextEdit();
   state.tool = t; state.selected = null;
   $$('#tools button[data-tool]').forEach(b => b.classList.toggle('active', b.dataset.tool === t));
-  overlay.style.cursor = t === 'select' ? 'default' : t === 'text' ? 'text' : 'crosshair';
+  overlay.style.cursor = ''; overlay.className = t === 'select' ? '' : t === 'text' ? 'cur-text' : 'cur-cross';
   updateProps(); drawOverlay();
 }
 $$('#tools button[data-tool]').forEach(b => b.onclick = () => setTool(b.dataset.tool));
@@ -223,9 +251,7 @@ overlay.addEventListener('pointerdown', e => {
   if (t === 'text') {
     const hit = hitTest(x, y);
     if (hit && hit.type === 'text') { startTextEdit(hit); return; }
-    pushAnnotUndo(curPageId());
-    const a = { id: uid(), type: 'text', x, y: y - defaults.size * 0.6, w: 0, h: 0, rot: 0, text: '', size: defaults.size, font: defaults.font, bold: defaults.bold, color: defaults.color, opacity: defaults.opacity };
-    measureText(a); curAnnots().push(a); startTextEdit(a); return;
+    drag = { mode: 'textbox', start: [x, y], cur: [x, y] }; return;
   }
   pushAnnotUndo(curPageId());
   if (t === 'pen' || t === 'line' || t === 'arrow') {
@@ -244,12 +270,13 @@ overlay.addEventListener('pointermove', e => {
   if (drag.mode === 'draw') { const l = a.pts[a.pts.length - 1]; if (Math.hypot(x - l[0], y - l[1]) > 0.7) a.pts.push([x, y]); }
   else if (drag.mode === 'line') { a.pts[1] = [x, y]; }
   else if (drag.mode === 'shape') { const [sx, sy] = drag.start; a.x = Math.min(sx, x); a.y = Math.min(sy, y); a.w = Math.abs(x - sx); a.h = Math.abs(y - sy); }
+  else if (drag.mode === 'textbox') { drag.cur = [x, y]; }
   else if (drag.mode === 'move') {
     const dx = x - drag.start[0], dy = y - drag.start[1];
     if (a.pts) a.pts = drag.orig.map(p => [p[0] + dx, p[1] + dy]); else { a.x = drag.orig.x + dx; a.y = drag.orig.y + dy; }
   } else if (drag.mode === 'resize') {
     const [lx, ly] = localPt(a, x, y);
-    if (a.type === 'text') { const ns = Math.max(4, drag.orig.size * Math.max(ly, 4) / drag.orig.h); a.size = Math.round(ns * 2) / 2; measureText(a); $('#pSize').value = a.size; }
+    if (a.type === 'text') { a.boxW = Math.max(30, lx); measureText(a); }
     else if (a.type === 'image' && !e.shiftKey) { const nw = Math.max(4, lx); a.w = nw; a.h = nw * drag.orig.h / drag.orig.w; }
     else { a.w = Math.max(4, lx); a.h = Math.max(4, ly); }
   }
@@ -257,6 +284,13 @@ overlay.addEventListener('pointermove', e => {
 });
 function endDrag(e) {
   if (!drag) return;
+  if (drag.mode === 'textbox') {
+    const [sx, sy] = drag.start, [cx, cy] = drag.cur; drag = null;
+    const wBox = Math.abs(cx - sx), fixed = wBox > 25;
+    pushAnnotUndo(curPageId());
+    const a = { id: uid(), type: 'text', x: fixed ? Math.min(sx, cx) : sx, y: fixed ? Math.min(sy, cy) : sy - defaults.size * 0.6, w: 0, h: 0, rot: 0, text: '', size: defaults.size, font: defaults.font, bold: defaults.bold, color: defaults.color, opacity: defaults.opacity, boxW: fixed ? wBox : 0 };
+    measureText(a); curAnnots().push(a); drawOverlay(); startTextEdit(a); return;
+  }
   const a = drag.a, list = curAnnots();
   if ((drag.mode === 'shape' && (a.w < 2 || a.h < 2)) || (drag.mode === 'line' && Math.hypot(a.pts[1][0] - a.pts[0][0], a.pts[1][1] - a.pts[0][1]) < 2)) {
     list.splice(list.indexOf(a), 1); state.undo.pop();
@@ -292,7 +326,8 @@ function positionTextEditor() {
   ed.style.left = a.x * z + 'px'; ed.style.top = a.y * z + 'px';
   ed.style.font = fontCss(a, z); ed.style.color = a.color; ed.style.opacity = a.opacity;
   ed.style.transform = `rotate(${a.rot}deg)`;
-  ed.style.width = (a.w * z + 12) + 'px'; ed.style.height = (a.h * z + 2) + 'px';
+  ed.style.whiteSpace = a.boxW ? 'pre-wrap' : 'pre';
+  ed.style.width = (a.boxW ? a.boxW * z + 3 : a.w * z + 12) + 'px'; ed.style.height = (a.h * z + 3) + 'px';
 }
 ed.addEventListener('input', () => { if (!editing) return; editing.text = ed.value; positionTextEditor(); });
 ed.addEventListener('keydown', e => { if (e.key === 'Escape') { e.preventDefault(); commitTextEdit(); } e.stopPropagation(); });
@@ -355,17 +390,46 @@ $('#btnSign').onclick = () => {
 };
 
 /* ---------- keyboard ---------- */
+function pasteAnnot(a) {
+  a.id = uid(); delete a._editing;
+  if (a.pts) a.pts = a.pts.map(p => [p[0] + 15, p[1] + 15]); else { a.x += 15; a.y += 15; }
+  pushAnnotUndo(curPageId()); curAnnots().push(a);
+  if (state.tool !== 'select') setTool('select');
+  state.selected = a; updateProps(); drawOverlay(); refreshThumb(state.cur);
+}
+let lastNudge = 0;
+function nudge(key, d) {
+  const a = state.selected, dx = key === 'ArrowLeft' ? -d : key === 'ArrowRight' ? d : 0, dy = key === 'ArrowUp' ? -d : key === 'ArrowDown' ? d : 0;
+  if (Date.now() - lastNudge > 800) pushAnnotUndo(curPageId()); lastNudge = Date.now();
+  if (a.pts) a.pts = a.pts.map(p => [p[0] + dx, p[1] + dy]); else { a.x += dx; a.y += dy; }
+  drawOverlay(); refreshThumb(state.cur);
+}
 document.addEventListener('keydown', e => {
   const typing = ['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement.tagName);
-  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') { e.preventDefault(); undo(); return; }
-  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') { e.preventDefault(); savePdf(); return; }
-  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'o') { e.preventDefault(); $('#fileInput').click(); return; }
+  const mod = e.ctrlKey || e.metaKey, k = e.key.toLowerCase();
+  if (mod && k === 's') { e.preventDefault(); savePdf(); return; }
+  if (mod && k === 'o') { e.preventDefault(); $('#fileInput').click(); return; }
+  if (mod && k === 'p') { e.preventDefault(); $('#btnPrint').click(); return; }
   if (typing) return;
+  if (mod && k === 'z' && e.shiftKey) { e.preventDefault(); redo(); return; }
+  if (mod && k === 'z') { e.preventDefault(); undo(); return; }
+  if (mod && k === 'y') { e.preventDefault(); redo(); return; }
+  if (mod && k === 'c' && state.selected) { state.clipboard = JSON.stringify(state.selected); toast('Copied'); return; }
+  if (mod && k === 'v' && state.clipboard) { e.preventDefault(); pasteAnnot(JSON.parse(state.clipboard)); return; }
+  if (mod && k === 'd' && state.selected) { e.preventDefault(); pasteAnnot(JSON.parse(JSON.stringify(state.selected))); return; }
   if (e.key === 'Escape') { state.selected = null; setTool('select'); return; }
   if (e.key === 'Delete' || e.key === 'Backspace') { if (state.selected) { e.preventDefault(); deleteSelected(); } return; }
+  if (e.key.startsWith('Arrow') && state.selected) { e.preventDefault(); nudge(e.key, e.shiftKey ? 10 : 1); return; }
   if (e.key === 'ArrowLeft' || e.key === 'PageUp') { goTo(state.cur - 1); return; }
   if (e.key === 'ArrowRight' || e.key === 'PageDown') { goTo(state.cur + 1); return; }
   const map = { v: 'select', t: 'text', p: 'pen', h: 'highlight', r: 'rect', e: 'ellipse', l: 'line', a: 'arrow', w: 'whiteout' };
-  if (!e.ctrlKey && !e.metaKey && !e.altKey && map[e.key.toLowerCase()]) setTool(map[e.key.toLowerCase()]);
+  if (!mod && !e.altKey && map[k]) setTool(map[k]);
+});
+// Paste an image from the clipboard straight onto the page.
+document.addEventListener('paste', async e => {
+  if (!state.doc || ['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement.tagName)) return;
+  const item = [...((e.clipboardData && e.clipboardData.items) || [])].find(i => i.type.startsWith('image/'));
+  if (!item) return; e.preventDefault();
+  try { placeImage(await fileToImageAnnot(item.getAsFile())); toast('Image pasted onto the page'); } catch (err) { toast('Could not paste image'); }
 });
 setTool('select');

@@ -15,9 +15,15 @@
 
 ![KAM PDFs editing a document](screenshots/editor.png)
 
-## Why
+## Why this exists
 
-Most PDF editors are paid, bloated, or want your files on their servers. KAM PDFs is a single folder you download and open. Your PDFs never leave your machine.
+You know the routine. You need to sign one form or fix one line in a PDF. You find an "editor", spend twenty minutes doing the work, hit Save, and only then does the paywall appear. Pay up, or lose everything you just did. Your document is held hostage, and half the time it has been uploaded to a server you have never heard of.
+
+That is a scam dressed up as software, and I got sick of it. So I built KAM PDFs.
+
+**KAM PDFs is free. Not free for seven days, not free with a watermark, not free until you click Save. Free.** There is no account, no upgrade button, no trial, and no upload. Your files never leave your computer. It works with the internet unplugged.
+
+It stays that way. The code is MIT licensed, so it is yours to use, copy, and share with anyone. If someone ever tries to charge you for KAM PDFs, they are not me.
 
 ## Download
 
@@ -50,7 +56,9 @@ Unzip and open `index.html` in Chrome, Edge, Firefox, or Safari. Everything work
 - Freehand pen, lines, arrows, rectangles, ellipses
 - Highlighter and whiteout
 - Insert images and hand-drawn signatures
-- Move, resize, recolour, and delete anything you added, with undo
+- Fixed-width text boxes that wrap automatically, or free-floating text
+- Move, resize, recolour, and delete anything you added, with undo and redo
+- Copy, paste, duplicate, and nudge annotations with the keyboard; paste images from the clipboard
 
 **Document**
 - Fill in form fields (text, checkboxes, radio buttons, dropdowns), optionally flatten them
@@ -85,9 +93,11 @@ Click **Try the demo** on the welcome screen. It loads a three-page sample (a fo
 | `V` `T` `P` `H` | Select, Text, Pen, Highlight |
 | `R` `E` `L` `A` `W` | Rectangle, Ellipse, Line, Arrow, Whiteout |
 | `Del` | Delete the selected annotation |
-| `Ctrl+Z` | Undo |
-| `Ctrl+S` | Save PDF |
-| `←` `→` | Previous / next page |
+| `Ctrl+Z` / `Ctrl+Y` | Undo / redo |
+| `Ctrl+C` `Ctrl+V` `Ctrl+D` | Copy, paste, duplicate the selected annotation |
+| Arrow keys | Nudge the selected annotation (Shift for 10x) |
+| `Ctrl+S` / `Ctrl+P` | Save PDF / print |
+| `←` `→` | Previous / next page (nothing selected) |
 | `Ctrl` + mouse wheel | Zoom |
 
 ## How it works
