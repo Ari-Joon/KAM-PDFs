@@ -167,4 +167,4 @@ Install KAM PDFs.bat    double-click installer (Windows)
 
 ## Licence
 
-MIT. See [LICENSE](LICENSE). pdf.js is Apache 2.0; pdf-lib, PeerJS, and qrcode.js are MIT.
+MIT. See [LICENSE](LICENSE). The bundled libraries keep their own licences, listed in [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md).
