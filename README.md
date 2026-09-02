@@ -38,6 +38,8 @@ It stays that way. The code is MIT licensed, so it is yours to use, copy, and sh
 
 The installer only creates two shortcuts. To remove them, run `Remove shortcuts.bat`. Nothing else is written to your system.
 
+If you have also installed KAM PDFs from the website (see below), the installer notices and points the shortcut at that instead, so you get the sharp taskbar icon and only one Desktop icon. Installed the app after running the installer? Just run it again.
+
 > If Windows shows "Windows protected your PC", click **More info → Run anyway**. The script is a few lines of PowerShell you can read in `setup/install.ps1`.
 
 ### Install from the website (best icon, works offline too)
