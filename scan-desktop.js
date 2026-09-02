@@ -104,5 +104,6 @@
   }
   $('#scanPhotoInput').addEventListener('change', e => { const fs = [...e.target.files]; e.target.value = ''; if (fs.length) editFiles(fs); });
   $('#btnScan').onclick = openScanDialog;
+  $('#btnScan2').onclick = openScanDialog;
   window.addEventListener('beforeunload', () => { stopPeer(); stopCam(); });
 })();

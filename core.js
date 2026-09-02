@@ -103,7 +103,7 @@ async function renderPage() {
   const base = page.getViewport({ scale: 1 });
   state.pageSize = { w: base.width, h: base.height };
   if (state.fit) {
-    const availW = $('#viewport').clientWidth - 42, availH = $('#viewport').clientHeight - 42;
+    const availW = $('#viewport').clientWidth - 40, availH = $('#viewport').clientHeight - 40;
     const z = state.fit === 'page' ? Math.min(availW / base.width, availH / base.height) : availW / base.width;
     state.zoom = availW > 100 ? Math.max(0.1, Math.min(8, z)) : 1;
   }
@@ -314,41 +314,9 @@ function redo() {
 $('#btnUndo').onclick = undo;
 $('#btnRedo').onclick = redo;
 
-/* ---------- demo document ---------- */
-async function loadDemo() {
-  if (!window.KAM_DEMO_PDF) return toast('Demo file missing (examples/demo.js)');
-  const bin = atob(window.KAM_DEMO_PDF); const bytes = new Uint8Array(bin.length);
-  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-  await openBytes(bytes.buffer, 'kam-demo.pdf');
-  if (!state.doc || state.fileName !== 'kam-demo.pdf') return;
-  // A few sample annotations on page 1 so there is something to play with.
-  const id = state.pageIds[0]; const list = state.annots[id] = [];
-  const text = (x, y, t, extra) => { const a = Object.assign({ id: uid(), type: 'text', x, y, w: 0, h: 0, rot: 0, text: t, size: 16, font: 'Helvetica', bold: false, color: '#e11d48', opacity: 1 }, extra); measureText(a); return a; };
-  list.push({ id: uid(), type: 'rect', x: 58, y: 128, w: 478, h: 18, rot: 0, stroke: null, fill: '#ffff00', width: 0, opacity: 0.45, blend: 'multiply' });
-  list.push({ id: uid(), type: 'rect', x: 154, y: 377, w: 132, h: 36, rot: 0, stroke: '#f5b400', fill: null, width: 2.5, opacity: 1 });
-  list.push(text(330, 384, 'Pick a plan here', { color: '#b45309', bold: true, size: 14 }));
-  list.push({ id: uid(), type: 'arrow', pts: [[326, 395], [292, 395]], color: '#b45309', width: 2.5, opacity: 1 });
-  list.push({ id: uid(), type: 'pen', pts: [[135, 540], [150, 520], [165, 545], [180, 515], [195, 548], [215, 520], [240, 540], [270, 522], [300, 538]], color: '#1e3a8a', width: 2.5, opacity: 1 });
-  list.push(text(418, 526, '1 Sep 2026', { color: '#1e3a8a', size: 13 }));
-  list.push(text(340, 585, 'Looks good, approved!', { color: '#15803d', bold: true, size: 15, rot: -8 }));
-  list.push({ id: uid(), type: 'ellipse', x: 50, y: 243, w: 140, h: 34, rot: 0, stroke: '#e11d48', fill: null, width: 2, opacity: 1 });
-  drawOverlay(); renderThumbs();
-  toast('Demo loaded. Try the tools, then click Save PDF to download the result.', 5000);
-}
-$('#btnDemo').onclick = loadDemo;
 
 /* ---------- install as an app (when served over https) ---------- */
 let installPrompt = null;
 window.addEventListener('beforeinstallprompt', e => { e.preventDefault(); installPrompt = e; $('#btnInstall').hidden = false; });
 $('#btnInstall').onclick = async () => { if (!installPrompt) return; installPrompt.prompt(); await installPrompt.userChoice; installPrompt = null; $('#btnInstall').hidden = true; };
 window.addEventListener('appinstalled', () => { $('#btnInstall').hidden = true; toast('KAM PDFs installed. Find it in your Start menu.'); });
-(async () => {
-  const qp = new URLSearchParams(location.search);
-  if (qp.get('demo')) {
-    await loadDemo();
-    if (qp.get('page')) await goTo(parseInt(qp.get('page'), 10) - 1);
-    if (qp.get('tab')) { const b = $(`.tabs button[data-tab="${qp.get('tab')}"]`); if (b) b.click(); }
-    if (qp.get('tool')) setTool(qp.get('tool'));
-    if (qp.get('zoom')) setZoom(parseFloat(qp.get('zoom')));
-  }
-})();

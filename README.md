@@ -85,7 +85,7 @@ Unzip and open `index.html` in Chrome, Edge, Firefox, or Safari. Everything work
 
 ## Screenshots
 
-**Welcome screen.** Open a file, start blank, or load the built-in demo document.
+**Welcome screen.** Open a file, start a blank one, or scan a document.
 
 ![Welcome screen](screenshots/welcome.png)
 
@@ -105,11 +105,9 @@ Unzip and open `index.html` in Chrome, Edge, Firefox, or Safari. Everything work
 
 <img src="screenshots/scan-phone.png" width="360" alt="Phone scanner page">
 
-Light mode is one click away on the ☀ button.
+**Light mode.** One click on the ☀ button, remembered between sessions.
 
-## Try it in 10 seconds
-
-Click **Try the demo** on the welcome screen. It loads a three-page sample (a form, an invoice, and meeting notes) with a few annotations already placed, so you can move things around, add your own, and click **Save PDF** to see the result.
+![Light mode](screenshots/light.png)
 
 ## Scan with your phone
 
@@ -155,7 +153,6 @@ scan-core.js            edge detection, perspective correction, clean-up
 scan-ui.js              corner editor widget (phone and desktop)
 scan-desktop.js         Scan dialog, receives pages from the phone
 sw.js                   service worker: offline cache, installable app
-examples/demo.pdf       the sample document
 setup/install.ps1       creates the Desktop and Start Menu shortcuts
 Install KAM PDFs.bat    double-click installer (Windows)
 ```
