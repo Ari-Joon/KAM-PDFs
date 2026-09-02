@@ -146,7 +146,7 @@ Annotations are kept on a layer over the page while you work and are drawn into 
 
 ```
 index.html              layout and styles
-core.js                 loading, rendering, navigation, undo, demo
+core.js                 loading, rendering, navigation, undo, theme
 annot.js                annotation tools and editing
 ops.js                  page operations, forms, metadata, export
 lib/                    pdf.js, pdf-lib, peerjs, qrcode (all bundled)
