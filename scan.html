@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>KAM Scanner</title>
+<link rel="icon" type="image/png" sizes="192x192" href="icons/icon-192.png">
+<link rel="apple-touch-icon" href="icons/icon-192.png">
+<meta name="theme-color" content="#1e1f24">
+<script src="lib/peerjs.min.js"></script>
+<script src="lib/pdf-lib.min.js"></script>
+<script src="scan-core.js"></script>
+<script src="scan-ui.js"></script>
+<style>
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+html,body{height:100%;margin:0;font:15px/1.4 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;background:#1e1f24;color:#e6e6ea}
+body{display:flex;flex-direction:column;padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left)}
+button,label.btn{font:inherit;color:inherit;background:#2c2d34;border:1px solid #3d3e47;border-radius:10px;padding:10px 14px;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;gap:8px}
+button.primary,label.btn.primary{background:#f5b400;border-color:#f5b400;color:#111;font-weight:700}
+button:disabled{opacity:.4}
+input{font:inherit;color:inherit;background:#15161a;border:1px solid #3d3e47;border-radius:10px;padding:10px 12px}
+header{display:flex;align-items:center;gap:10px;padding:10px 14px;background:#26272e;border-bottom:1px solid #3d3e47}
+header img{width:30px;height:30px}
+header .brand{font-weight:800;color:#f5b400;font-size:17px;letter-spacing:.5px}
+header .brand span{color:#e6e6ea;font-weight:500}
+.pill{margin-left:auto;font-size:12px;padding:5px 10px;border-radius:999px;background:#3a3b44;border:1px solid #4a4b55;cursor:pointer;white-space:nowrap}
+.pill.ok{background:#14532d;border-color:#166534;color:#bbf7d0}
+.pill.err{background:#7f1d1d;border-color:#991b1b;color:#fecaca}
+main{flex:1;min-height:0;overflow:auto;padding:14px;display:flex;flex-direction:column;gap:14px}
+.big-actions{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.big-actions .btn{padding:18px 10px;font-size:16px;flex-direction:column}
+.big-actions .btn .ico{font-size:28px}
+.pages{display:grid;grid-template-columns:repeat(auto-fill,minmax(110px,1fr));gap:10px}
+.page{position:relative;background:#26272e;border:1px solid #3d3e47;border-radius:10px;padding:6px;text-align:center}
+.page img{width:100%;height:130px;object-fit:contain;background:#fff;border-radius:6px;display:block}
+.page .n{position:absolute;top:10px;left:10px;background:rgba(0,0,0,.7);color:#fff;font-size:11px;padding:2px 7px;border-radius:999px}
+.page .x{position:absolute;top:8px;right:8px;background:#b91c1c;color:#fff;border:none;border-radius:999px;width:24px;height:24px;padding:0;font-size:13px}
+.page .mv{display:flex;justify-content:center;gap:6px;margin-top:6px}
+.page .mv button{padding:2px 10px;font-size:13px}
+.page.sent img{outline:3px solid #22c55e}
+.empty{color:#8b8d96;text-align:center;padding:30px 10px;line-height:1.6}
+#editor{flex:1;min-height:0;display:flex;flex-direction:column}
+#editor .ks-wrap{height:100%}
+footer{display:grid;grid-template-columns:1fr 1fr;gap:8px;padding:10px 14px;background:#26272e;border-top:1px solid #3d3e47}
+footer #btnSend{grid-column:1/3}
+.sheet{position:fixed;inset:0;background:rgba(0,0,0,.65);display:flex;align-items:flex-end;justify-content:center;z-index:50}
+.sheet>div{background:#26272e;border-radius:16px 16px 0 0;padding:18px 16px calc(18px + env(safe-area-inset-bottom));width:100%;max-width:520px}
+.sheet h3{margin:0 0 8px}
+.sheet .row{display:flex;gap:8px;margin-top:12px}
+.sheet input{flex:1;font-size:22px;letter-spacing:4px;text-transform:uppercase;text-align:center}
+.muted{color:#8b8d96;font-size:13px}
+#toast{position:fixed;left:50%;bottom:90px;transform:translateX(-50%);background:#333;border:1px solid #555;color:#fff;padding:10px 16px;border-radius:10px;display:none;z-index:60;max-width:90vw;text-align:center}
+#prog{height:6px;background:#3d3e47;border-radius:3px;overflow:hidden;display:none}
+#prog>div{height:100%;background:#f5b400;width:0;transition:width .2s}
+</style>
+</head>
+<body>
+<header><img src="logo.svg" alt=""><div class="brand">KAM <span>Scanner</span></div><span id="status" class="pill">Not connected · tap to pair</span></header>
+<main>
+  <section id="home" style="display:contents">
+    <div class="big-actions">
+      <label class="btn primary"><span class="ico">📷</span>Take photo<input id="camIn" type="file" accept="image/*" capture="environment" multiple hidden></label>
+      <label class="btn"><span class="ico">🖼</span>From gallery<input id="galIn" type="file" accept="image/*" multiple hidden></label>
+    </div>
+    <div id="prog"><div></div></div>
+    <div id="pages" class="pages"></div>
+    <div id="pagesEmpty" class="empty">No pages yet.<br>Take a photo of a document. Lay it flat on a darker surface for best results.</div>
+  </section>
+  <section id="editor" hidden></section>
+</main>
+<footer id="foot">
+  <button id="btnSend" class="primary" disabled>Send to computer</button>
+  <button id="btnPdf" disabled>Save PDF</button>
+  <button id="btnShare" disabled>Share PDF</button>
+</footer>
+<div id="pair" class="sheet" hidden><div>
+  <h3>Connect to your computer</h3>
+  <div class="muted">In KAM PDFs on your computer click <b>Scan</b>. Scan the QR code with your phone camera, or type the 6-character code shown there.</div>
+  <div class="row"><input id="codeIn" maxlength="6" placeholder="CODE" autocapitalize="characters" autocomplete="off"><button id="btnPair" class="primary">Connect</button></div>
+  <div class="row"><button id="btnPairClose" style="flex:1">Close</button></div>
+</div></div>
+<div id="toast"></div>
+<script>
+'use strict';
+const $ = s => document.querySelector(s);
+const pages = [];          // {blob, url, w, h, sent}
+let conn = null, peer = null, connectedCode = '';
+let toastT; function toast(m, ms = 2500) { const t = $('#toast'); t.textContent = m; t.style.display = 'block'; clearTimeout(toastT); toastT = setTimeout(() => t.style.display = 'none', ms); }
+function setStatus(text, cls) { const s = $('#status'); s.textContent = text; s.className = 'pill ' + (cls || ''); }
+
+/* ---------- pages ---------- */
+function renderPages() {
+  const cont = $('#pages'); cont.innerHTML = '';
+  $('#pagesEmpty').style.display = pages.length ? 'none' : '';
+  pages.forEach((p, i) => {
+    const d = document.createElement('div'); d.className = 'page' + (p.sent ? ' sent' : '');
+    d.innerHTML = `<img src="${p.url}" alt=""><span class="n">${i + 1}</span><button class="x" title="Remove">✕</button><div class="mv"><button data-d="-1">‹</button><button data-d="1">›</button></div>`;
+    d.querySelector('.x').onclick = () => { URL.revokeObjectURL(p.url); pages.splice(i, 1); renderPages(); };
+    d.querySelectorAll('.mv button').forEach(b => b.onclick = () => { const j = i + (+b.dataset.d); if (j < 0 || j >= pages.length) return; [pages[i], pages[j]] = [pages[j], pages[i]]; renderPages(); });
+    cont.appendChild(d);
+  });
+  const has = pages.length > 0;
+  $('#btnSend').disabled = !(has && conn && conn.open); $('#btnPdf').disabled = !has; $('#btnShare').disabled = !(has && navigator.share);
+  $('#btnSend').textContent = has ? `Send ${pages.length} page${pages.length > 1 ? 's' : ''} to computer` : 'Send to computer';
+}
+
+/* ---------- capture -> editor queue ---------- */
+let queue = [];
+async function enqueue(files) { queue.push(...files); if (queue.length === files.length) runQueue(); }
+async function runQueue() {
+  while (queue.length) {
+    const f = queue.shift();
+    $('#home').style.display = 'none'; $('#editor').hidden = false; $('#foot').style.display = 'none';
+    await new Promise(res => KamScanUI.open(f, {
+      mount: $('#editor'), mode: 'color',
+      onDone: ({ blob, canvas }) => { pages.push({ blob, url: URL.createObjectURL(blob), w: canvas.width, h: canvas.height, sent: false }); res(); },
+      onCancel: () => res(),
+    }));
+  }
+  $('#editor').hidden = true; $('#home').style.display = 'contents'; $('#foot').style.display = '';
+  renderPages();
+}
+$('#camIn').addEventListener('change', e => { enqueue([...e.target.files]); e.target.value = ''; });
+$('#galIn').addEventListener('change', e => { enqueue([...e.target.files]); e.target.value = ''; });
+
+/* ---------- pairing with the computer (WebRTC, direct device to device) ---------- */
+function connect(code) {
+  code = (code || '').trim().toUpperCase(); if (code.length !== 6) return toast('Enter the 6-character code');
+  if (peer) { try { peer.destroy(); } catch (e) { } }
+  setStatus('Connecting…');
+  peer = new Peer({ debug: 1 });
+  peer.on('open', () => {
+    conn = peer.connect('kam-pdfs-' + code, { reliable: true });
+    const timer = setTimeout(() => { if (!conn.open) { setStatus('Could not reach computer · tap to retry', 'err'); toast('No computer found with that code. Is the Scan dialog open in KAM PDFs?', 4000); } }, 15000);
+    conn.on('open', () => { clearTimeout(timer); connectedCode = code; setStatus('Connected to computer', 'ok'); toast('Connected. Take photos, then send.'); $('#pair').hidden = true; try { localStorage.setItem('kam-scan-code', code); } catch (e) { } renderPages(); });
+    conn.on('data', d => { if (d && d.type === 'ack') ackResolve && ackResolve(d.i); });
+    conn.on('close', () => { setStatus('Disconnected · tap to reconnect', 'err'); renderPages(); });
+    conn.on('error', e => { setStatus('Connection error · tap to retry', 'err'); console.error(e); });
+  });
+  peer.on('error', e => { console.error(e); setStatus('Connection error · tap to retry', 'err'); toast(e.type === 'peer-unavailable' ? 'No computer found with that code. Open Scan in KAM PDFs first.' : 'Connection problem: ' + e.type, 4500); });
+}
+let ackResolve = null;
+async function sendAll() {
+  if (!conn || !conn.open) return toast('Not connected to the computer');
+  const todo = pages.filter(p => !p.sent); if (!todo.length) return toast('All pages already sent');
+  $('#btnSend').disabled = true; const prog = $('#prog'); prog.style.display = 'block';
+  for (let k = 0; k < todo.length; k++) {
+    const p = todo[k]; const buf = await p.blob.arrayBuffer();
+    const i = pages.indexOf(p);
+    const ack = new Promise(res => { ackResolve = res; });
+    conn.send({ type: 'page', i, n: todo.length, k, w: p.w, h: p.h, data: buf });
+    setStatus(`Sending ${k + 1} of ${todo.length}…`, 'ok');
+    await Promise.race([ack, new Promise(r => setTimeout(r, 30000))]);
+    p.sent = true; prog.firstElementChild.style.width = Math.round((k + 1) / todo.length * 100) + '%';
+  }
+  setStatus('Connected to computer', 'ok'); toast(`Sent ${todo.length} page${todo.length > 1 ? 's' : ''} to your computer`);
+  setTimeout(() => { prog.style.display = 'none'; prog.firstElementChild.style.width = '0'; }, 800);
+  renderPages();
+}
+$('#btnSend').onclick = sendAll;
+$('#status').onclick = () => { $('#pair').hidden = false; $('#codeIn').value = connectedCode || $('#codeIn').value; setTimeout(() => $('#codeIn').focus(), 50); };
+$('#btnPair').onclick = () => connect($('#codeIn').value);
+$('#codeIn').addEventListener('keydown', e => { if (e.key === 'Enter') connect($('#codeIn').value); });
+$('#btnPairClose').onclick = () => $('#pair').hidden = true;
+
+/* ---------- PDF on the phone ---------- */
+async function buildPdf() {
+  const { PDFDocument } = PDFLib; const doc = await PDFDocument.create();
+  for (const p of pages) {
+    const img = await doc.embedJpg(await p.blob.arrayBuffer());
+    const sc = 842 / Math.max(p.w, p.h); const w = p.w * sc, h = p.h * sc;
+    doc.addPage([w, h]).drawImage(img, { x: 0, y: 0, width: w, height: h });
+  }
+  doc.setTitle('Scan'); doc.setProducer('KAM PDFs');
+  return new Blob([await doc.save()], { type: 'application/pdf' });
+}
+const stamp = () => new Date().toISOString().slice(0, 16).replace('T', ' ').replace(':', '.');
+$('#btnPdf').onclick = async () => {
+  toast('Building PDF…'); const blob = await buildPdf();
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `Scan ${stamp()}.pdf`; document.body.appendChild(a); a.click(); a.remove();
+  toast('PDF saved to your downloads');
+};
+$('#btnShare').onclick = async () => {
+  const blob = await buildPdf(); const file = new File([blob], `Scan ${stamp()}.pdf`, { type: 'application/pdf' });
+  try { if (navigator.canShare && navigator.canShare({ files: [file] })) await navigator.share({ files: [file], title: 'Scan' }); else await navigator.share({ title: 'Scan', text: 'Scanned with KAM PDFs' }); }
+  catch (e) { if (e.name !== 'AbortError') toast('Sharing not available here. Use Save PDF instead.'); }
+};
+
+/* ---------- start ---------- */
+const hashCode = location.hash.replace('#', '').trim();
+if (hashCode.length === 6) connect(hashCode);
+else { try { const c = localStorage.getItem('kam-scan-code'); if (c) $('#codeIn').value = c; } catch (e) { } }
+renderPages();
+if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
+  let hadController = !!navigator.serviceWorker.controller;
+  navigator.serviceWorker.register('sw.js').catch(() => { });
+  navigator.serviceWorker.addEventListener('controllerchange', () => { if (hadController && !pages.length) location.reload(); hadController = false; });
+}
+</script>
+</body>
+</html>

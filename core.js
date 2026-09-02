@@ -336,6 +336,12 @@ async function loadDemo() {
   toast('Demo loaded. Try the tools, then click Save PDF to download the result.', 5000);
 }
 $('#btnDemo').onclick = loadDemo;
+
+/* ---------- install as an app (when served over https) ---------- */
+let installPrompt = null;
+window.addEventListener('beforeinstallprompt', e => { e.preventDefault(); installPrompt = e; $('#btnInstall').hidden = false; });
+$('#btnInstall').onclick = async () => { if (!installPrompt) return; installPrompt.prompt(); await installPrompt.userChoice; installPrompt = null; $('#btnInstall').hidden = true; };
+window.addEventListener('appinstalled', () => { $('#btnInstall').hidden = true; toast('KAM PDFs installed. Find it in your Start menu.'); });
 (async () => {
   const qp = new URLSearchParams(location.search);
   if (qp.get('demo')) {

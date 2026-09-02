@@ -100,6 +100,15 @@ input[type=checkbox]{accent-color:var(--accent)}
 #toast{position:fixed;bottom:50px;left:50%;transform:translateX(-50%);background:var(--panel);color:var(--text);border:1px solid var(--border);padding:8px 14px;border-radius:8px;display:none;z-index:70;box-shadow:0 2px 10px rgba(0,0,0,.35);max-width:80vw}
 #busy{position:fixed;inset:0;background:rgba(0,0,0,.45);color:#fff;display:none;align-items:center;justify-content:center;z-index:80;font-size:16px}
 #busy.show{display:flex}
+.scan-grid{display:grid;grid-template-columns:1fr 1fr;gap:20px;min-width:640px}
+.scan-grid[hidden],#scanEditor[hidden]{display:none}
+.scan-col h4{margin:0 0 8px;font-size:12px;text-transform:uppercase;letter-spacing:.6px;color:var(--muted)}
+.qr{background:#fff;padding:8px;border-radius:8px;display:inline-block}
+.qr img,.qr canvas{display:block}
+.scan-code{font-size:18px;letter-spacing:3px;color:var(--accent)}
+#scanStatus.ok{color:#22c55e}
+#scanStatus.err{color:#ef4444}
+#modalBox .primary{background:var(--accent);border-color:var(--accent);color:var(--accent-text)}
 kbd{background:var(--kbd);border:1px solid var(--border);border-radius:4px;padding:0 4px;font-size:11px}
 </style>
 </head>
@@ -111,6 +120,7 @@ kbd{background:var(--kbd);border:1px solid var(--border);border-radius:4px;paddi
     <button id="btnNew" title="Create a new blank document">New</button>
     <button id="btnMerge" title="Append pages from other PDFs">Merge PDF…</button>
     <button id="btnAddImages" title="Add images as new pages">Images → pages</button>
+    <button id="btnScan" title="Scan documents with your phone or webcam">📷 Scan</button>
   </div>
   <div class="group">
     <button id="btnUndo" title="Undo (Ctrl+Z)">↶ Undo</button>
@@ -121,7 +131,7 @@ kbd{background:var(--kbd);border:1px solid var(--border);border-radius:4px;paddi
     <button id="btnPrint">🖨 Print</button>
   </div>
   <div class="group right">
-    <button id="btnZoomOut">−</button><span id="zoomLabel" style="min-width:44px;text-align:center">100%</span><button id="btnZoomIn">+</button><button id="btnFit">Fit width</button><button id="btnFitPage">Fit page</button><button id="btnTheme" title="Switch light / dark mode">☀</button>
+    <button id="btnZoomOut">−</button><span id="zoomLabel" style="min-width:44px;text-align:center">100%</span><button id="btnZoomIn">+</button><button id="btnFit">Fit width</button><button id="btnFitPage">Fit page</button><button id="btnTheme" title="Switch light / dark mode">☀</button><button id="btnInstall" class="primary" hidden title="Install KAM PDFs as an app with its own window and icon">⬇ Install app</button>
   </div>
 </header>
 <div id="main">
@@ -218,6 +228,7 @@ kbd{background:var(--kbd);border:1px solid var(--border);border-radius:4px;paddi
       <div class="row" id="formActions" style="display:none;margin-top:10px"><button id="btnApplyForm" class="primary">Apply values</button></div>
     </div>
     <div class="tab" id="tab-help">
+      <div class="muted" style="margin-bottom:10px">KAM PDFs <b>v1.5.0</b> · free forever · <a href="https://github.com/Ari-Joon/KAM-PDFs" target="_blank" rel="noopener" style="color:var(--accent)">GitHub</a></div>
       <h4>Shortcuts</h4>
       <div class="muted" style="line-height:1.9">
         <kbd>V</kbd> select · <kbd>T</kbd> text · <kbd>P</kbd> pen · <kbd>H</kbd> highlight<br>
@@ -230,6 +241,7 @@ kbd{background:var(--kbd);border:1px solid var(--border);border-radius:4px;paddi
       <div class="muted" style="line-height:1.6">
         <b>Text:</b> click to place free text, or drag out a box first and the text wraps to that width. Drag the corner square to change the width. Double-click to edit. Paste an image from the clipboard with Ctrl+V.<br><br>
         Annotations are drawn on top of the page when you save. Whiteout only covers content visually; the underlying text stays in the file.<br><br>
+        <b>Scan:</b> click 📷 Scan, point your phone at the QR code, photograph pages on the phone and tap Send. Pages arrive here straightened and cleaned up. No phone? Use the webcam or clean up existing photos.<br><br>
         Password-protected PDFs can't be opened. Print them to a new PDF first.
       </div>
     </div>
@@ -243,9 +255,27 @@ kbd{background:var(--kbd);border:1px solid var(--border);border-radius:4px;paddi
 <input type="file" id="mergeInput" accept="application/pdf,.pdf" multiple hidden>
 <input type="file" id="imgInput" accept="image/*" multiple hidden>
 <input type="file" id="imgAnnotInput" accept="image/*" hidden>
+<input type="file" id="scanPhotoInput" accept="image/*" multiple hidden>
 <script src="examples/demo.js"></script>
 <script src="core.js"></script>
 <script src="annot.js"></script>
 <script src="ops.js"></script>
+<script src="lib/peerjs.min.js"></script>
+<script src="lib/qrcode.min.js"></script>
+<script src="scan-core.js"></script>
+<script src="scan-ui.js"></script>
+<script src="scan-desktop.js"></script>
+<script>
+if ("serviceWorker" in navigator && location.protocol.startsWith("http")) {
+  var hadController = !!navigator.serviceWorker.controller;
+  navigator.serviceWorker.register("sw.js").catch(function(){});
+  // A new version installed: reload once so the user runs the latest code (unless they have unsaved work).
+  navigator.serviceWorker.addEventListener("controllerchange", function () {
+    if (!hadController) return; hadController = false;
+    if (window.state && state.dirty) { toast("A new version of KAM PDFs is ready. Save your work, then reload.", 8000); }
+    else location.reload();
+  });
+}
+</script>
 </body>
 </html>

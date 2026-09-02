@@ -4,20 +4,23 @@
 
 <h1 align="center">KAM PDFs</h1>
 
-<p align="center"><b>A free PDF editor that just works. No account, no subscription, no upload. Runs on your computer, even offline.</b></p>
+<p align="center"><b>A free PDF editor and document scanner that just works. No account, no subscription, no upload. Runs on your computer, even offline.</b></p>
 
 <p align="center">
   <a href="#download">Download</a> ·
   <a href="#what-it-does">Features</a> ·
+  <a href="#scan-with-your-phone">Scanner</a> ·
   <a href="#screenshots">Screenshots</a> ·
   <a href="#how-it-works">How it works</a>
 </p>
 
-![KAM PDFs editing a document](screenshots/editor.png)
+![KAM PDFs editing a real document](screenshots/york-text.png)
 
 ## Why this exists
 
 You know the routine. You need to sign one form or fix one line in a PDF. You find an "editor", spend twenty minutes doing the work, hit Save, and only then does the paywall appear. Pay up, or lose everything you just did. Your document is held hostage, and half the time it has been uploaded to a server you have never heard of.
+
+Scanner apps are the same story: point your phone at a letter and there is a subscription screen before the PDF. Straightening a photo and cleaning it up is not hard, and it is certainly not worth a monthly fee.
 
 That is a scam dressed up as software, and I got sick of it. So I built KAM PDFs.
 
@@ -37,9 +40,13 @@ The installer only creates two shortcuts. To remove them, run `Remove shortcuts.
 
 > If Windows shows "Windows protected your PC", click **More info → Run anyway**. The script is a few lines of PowerShell you can read in `setup/install.ps1`.
 
+### Install from the website (best icon, works offline too)
+
+Open **https://ari-joon.github.io/KAM-PDFs/** in Chrome or Edge and click **⬇ Install app** in the top right (or the install icon in the address bar). You get a proper app with its own window, a sharp taskbar icon, and a Start Menu entry. The whole app is cached on your computer, so it keeps working with no internet.
+
 ### Mac, Linux, or no install
 
-Unzip and open `index.html` in Chrome, Edge, Firefox, or Safari. Everything works the same. You can also use it straight from the browser at the GitHub Pages link at the top of this repo.
+Unzip and open `index.html` in Chrome, Edge, Firefox, or Safari. Everything works the same. You can also use it straight from the browser at the link above.
 
 ## What it does
 
@@ -60,6 +67,13 @@ Unzip and open `index.html` in Chrome, Edge, Firefox, or Safari. Everything work
 - Move, resize, recolour, and delete anything you added, with undo and redo
 - Copy, paste, duplicate, and nudge annotations with the keyboard; paste images from the clipboard
 
+**Scan**
+- Use your phone as a scanner: photograph pages, they arrive on the computer straightened and cleaned up
+- Auto-detects the page edges, with draggable corners to fix it when it guesses wrong
+- Colour, grey, or black-and-white clean-up, rotation
+- Works from the computer's webcam or from photos you already have
+- The phone page also saves and shares PDFs on its own, no computer needed
+
 **Document**
 - Fill in form fields (text, checkboxes, radio buttons, dropdowns), optionally flatten them
 - Watermark and page numbers on every page
@@ -75,21 +89,40 @@ Unzip and open `index.html` in Chrome, Edge, Firefox, or Safari. Everything work
 
 ![Welcome screen](screenshots/welcome.png)
 
-**Form filling.** Fields are listed in the right-hand panel; type and click Apply.
+**Pen and colours.** Freehand drawing with any colour and width.
 
-![Form fields panel](screenshots/forms.png)
+![Pen tool](screenshots/york-pen.png)
 
-**Pages and drawing.** Landscape pages, thumbnails you can drag to reorder, and the pen tool.
+**Signatures.** Draw once, place anywhere, resize.
 
-![Pen tool on a landscape page](screenshots/pages.png)
+![Signature dialog](screenshots/york-sign.png)
 
-**Light mode.** One click on the ☀ button.
+**Scanning.** The Scan dialog on the computer and the scanner page on the phone.
 
-![Light mode](screenshots/light.png)
+![Scan dialog](screenshots/scan-dialog.png)
+
+![Clean-up preview: straightened and converted to black and white](screenshots/scan-preview.png)
+
+<img src="screenshots/scan-phone.png" width="360" alt="Phone scanner page">
+
+Light mode is one click away on the ☀ button.
 
 ## Try it in 10 seconds
 
 Click **Try the demo** on the welcome screen. It loads a three-page sample (a form, an invoice, and meeting notes) with a few annotations already placed, so you can move things around, add your own, and click **Save PDF** to see the result.
+
+## Scan with your phone
+
+1. On the computer, click **📷 Scan**. A QR code and a 6-character code appear.
+2. On your phone, point the camera at the QR code (or open the scanner page and type the code).
+3. Tap **Take photo**, photograph a page, drag the corners if needed, pick Colour / Grey / B&W, tap **Add page**. Repeat for more pages.
+4. Tap **Send to computer**. The pages appear in KAM PDFs as new pages. Annotate, sign, save.
+
+The phone and computer talk to each other **directly** over an encrypted WebRTC connection. A small public relay (the PeerJS broker) is used only to introduce the two devices by that code; it never sees your pages. Both devices need internet for that first handshake, then the pages flow device to device.
+
+No computer nearby? The phone page works on its own: scan, then **Save PDF** or **Share PDF**.
+
+Phone scanner page: https://ari-joon.github.io/KAM-PDFs/scan.html
 
 ## Keyboard shortcuts
 
@@ -116,7 +149,12 @@ index.html              layout and styles
 core.js                 loading, rendering, navigation, undo, demo
 annot.js                annotation tools and editing
 ops.js                  page operations, forms, metadata, export
-lib/                    pdf.js 3.11.174 and pdf-lib 1.17.1
+lib/                    pdf.js, pdf-lib, peerjs, qrcode (all bundled)
+scan.html               phone scanner page
+scan-core.js            edge detection, perspective correction, clean-up
+scan-ui.js              corner editor widget (phone and desktop)
+scan-desktop.js         Scan dialog, receives pages from the phone
+sw.js                   service worker: offline cache, installable app
 examples/demo.pdf       the sample document
 setup/install.ps1       creates the Desktop and Start Menu shortcuts
 Install KAM PDFs.bat    double-click installer (Windows)
@@ -130,4 +168,4 @@ Install KAM PDFs.bat    double-click installer (Windows)
 
 ## Licence
 
-MIT. See [LICENSE](LICENSE). pdf.js is Apache 2.0 and pdf-lib is MIT.
+MIT. See [LICENSE](LICENSE). pdf.js is Apache 2.0; pdf-lib, PeerJS, and qrcode.js are MIT.
