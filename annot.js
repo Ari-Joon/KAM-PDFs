@@ -54,11 +54,31 @@ function arrowHead(a) {
 }
 
 /* ---------- drawing ---------- */
-function drawAnnots(ctx, pageId, s, selected) {
-  for (const a of (state.annots[pageId] || [])) { if (!a._editing) drawAnnot(ctx, a, s); }
+function drawAnnots(ctx, pageId, s, selected, opts) {
+  const spell = !opts || opts.spell !== false;
+  for (const a of (state.annots[pageId] || [])) { if (!a._editing) drawAnnot(ctx, a, s, spell); }
   if (selected) drawSelection(ctx, selected, s);
 }
-function drawAnnot(ctx, a, s) {
+/* Red dotted underline beneath misspelled words. Screen only: it is never exported. */
+function drawSpellMarks(ctx, a, s) {
+  if (typeof KamSpell === 'undefined' || !KamSpell.ready) return;
+  if (typeof spellUnderlineOn !== 'function' || !spellUnderlineOn()) return;
+  ctx.save();
+  ctx.strokeStyle = '#ef4444'; ctx.lineWidth = Math.max(1, 1.4 * s / 2); ctx.setLineDash([2 * s / 2, 2 * s / 2]);
+  ctx.font = fontCss(a, s);
+  const lh = a.size * 1.2 * s;
+  (a.lines || a.text.split('\n')).forEach((line, i) => {
+    const y = i * lh + a.size * 1.06 * s;
+    for (const t of KamSpell.tokens(line)) {
+      if (!KamSpell.isMisspelled(t.word)) continue;
+      const x1 = ctx.measureText(line.slice(0, t.start)).width;
+      const x2 = ctx.measureText(line.slice(0, t.end)).width;
+      ctx.beginPath(); ctx.moveTo(x1, y); ctx.lineTo(x2, y); ctx.stroke();
+    }
+  });
+  ctx.restore();
+}
+function drawAnnot(ctx, a, s, spell) {
   ctx.save();
   ctx.globalAlpha = a.opacity == null ? 1 : a.opacity;
   if (a.blend === 'multiply') ctx.globalCompositeOperation = 'multiply';
@@ -76,6 +96,7 @@ function drawAnnot(ctx, a, s) {
       ctx.fillStyle = a.color; ctx.font = fontCss(a, s); ctx.textBaseline = 'alphabetic';
       const lh = a.size * 1.2 * s;
       (a.lines || a.text.split('\n')).forEach((line, i) => ctx.fillText(line, 0, i * lh + a.size * 0.9 * s));
+      if (spell) drawSpellMarks(ctx, a, s);
     } else if (a.type === 'rect') {
       if (a.fill) { ctx.fillStyle = a.fill; ctx.fillRect(0, 0, w, h); }
       if (a.stroke) { ctx.strokeStyle = a.stroke; ctx.lineWidth = a.width * s; ctx.strokeRect(0, 0, w, h); }

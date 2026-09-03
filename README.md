@@ -68,6 +68,7 @@ Unzip and open `index.html` in Chrome, Edge, Firefox, or Safari. Everything work
 - Fixed-width text boxes that wrap automatically, or free-floating text
 - Move, resize, recolour, and delete anything you added, with undo and redo
 - Copy, paste, duplicate, and nudge annotations with the keyboard; paste images from the clipboard
+- Spell checking on text you add: misspellings are underlined, with suggested corrections and your own dictionary for names and jargon
 
 **Scan**
 - Use your phone as a scanner: photograph pages, they arrive on the computer straightened and cleaned up
@@ -150,6 +151,9 @@ core.js                 loading, rendering, navigation, undo, theme
 annot.js                annotation tools and editing
 ops.js                  page operations, forms, metadata, export
 lib/                    pdf.js, pdf-lib, peerjs, qrcode (all bundled)
+spell.js                dictionary loading, checking and suggestions
+spell-ui.js             underlines and the spelling review dialog
+dict/en.txt             bundled English word list (loaded on first use)
 scan.html               phone scanner page
 scan-core.js            edge detection, perspective correction, clean-up
 scan-ui.js              corner editor widget (phone and desktop)

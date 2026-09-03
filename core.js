@@ -187,7 +187,7 @@ async function renderThumb(i, c) {
   }
   c.width = off.width; c.height = off.height;
   const ctx = c.getContext('2d'); ctx.drawImage(off, 0, 0);
-  drawAnnots(ctx, state.pageIds[i], off._scale, null);
+  drawAnnots(ctx, state.pageIds[i], off._scale, null, { spell: false });
 }
 let thumbRefreshTimer;
 function refreshThumb(i) {

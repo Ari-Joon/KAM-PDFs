@@ -135,6 +135,14 @@ input[type=range]{accent-color:var(--accent)}
 .scan-code{font-size:18px;letter-spacing:3px;color:var(--accent)}
 #scanStatus.ok{color:#22c55e}
 #scanStatus.err{color:#ef4444}
+.spell-list{max-height:52vh;overflow:auto;margin:4px 0 10px}
+.spell-item{display:flex;align-items:center;gap:10px;padding:9px 4px;border-bottom:1px solid var(--border);flex-wrap:wrap}
+.spell-item:last-child{border-bottom:none}
+.spell-word{font-weight:700;color:#ef4444;min-width:120px}
+.spell-where{color:var(--muted);font-size:12px;flex:1;min-width:120px}
+.spell-fix{display:flex;gap:5px;flex-wrap:wrap}
+.spell-fix button{padding:3px 9px}
+.spell-none{color:#22c55e;padding:10px 2px}
 
 #toast{position:fixed;bottom:50px;left:50%;transform:translateX(-50%);background:var(--panel);color:var(--text);border:1px solid var(--border);padding:8px 14px;border-radius:8px;display:none;z-index:70;box-shadow:0 2px 10px rgba(0,0,0,.35);max-width:80vw;text-align:center}
 #busy{position:fixed;inset:0;background:rgba(0,0,0,.45);color:#fff;display:none;align-items:center;justify-content:center;z-index:80;font-size:16px}
@@ -212,7 +220,7 @@ kbd{background:var(--kbd);border:1px solid var(--border);border-radius:4px;paddi
       <div id="pageWrap">
         <canvas id="pageCanvas"></canvas>
         <canvas id="overlay"></canvas>
-        <textarea id="textEditor" rows="1"></textarea>
+        <textarea id="textEditor" rows="1" spellcheck="true" autocorrect="off" autocapitalize="sentences"></textarea>
       </div>
       <div id="empty">
         <img src="logo.svg" alt="KAM logo" style="width:112px;height:112px;border-radius:24px;box-shadow:0 8px 28px rgba(0,0,0,.5)">
@@ -247,6 +255,10 @@ kbd{background:var(--kbd);border:1px solid var(--border);border-radius:4px;paddi
       <div class="row"><input id="pnFormat" value="Page {n} of {total}" style="flex:1"><select id="pnPos"><option value="bottom">Bottom</option><option value="top">Top</option></select><button id="btnPageNums">Add</button></div>
       <h4>Text</h4>
       <div class="row"><button id="btnExtractText">Extract text of this page</button></div>
+      <h4>Spelling</h4>
+      <div class="row"><label><input type="checkbox" id="spellUnderline" checked> Underline misspelled words</label></div>
+      <div class="row"><button id="btnSpell">Check spelling</button><span id="spellState" class="muted"></span></div>
+      <div class="muted">Checks the text you have added, not the text already in the PDF.</div>
       <h4>Metadata</h4>
       <div class="field"><label>Title</label><input id="mTitle"></div>
       <div class="field"><label>Author</label><input id="mAuthor"></div>
@@ -272,6 +284,7 @@ kbd{background:var(--kbd);border:1px solid var(--border);border-radius:4px;paddi
       <div class="muted" style="line-height:1.6">
         <b>Text:</b> click to place free text, or drag out a box first and the text wraps to that width. Drag the corner square to change the width. Double-click to edit. Paste an image from the clipboard with Ctrl+V.<br><br>
         Annotations are drawn on top of the page when you save. Whiteout only covers content visually; the underlying text stays in the file.<br><br>
+        <b>Spelling:</b> misspelled words in text you add get a red dotted underline, and your browser underlines them while you type (right-click for its suggestions). "Check spelling" in the Document tab lists every one with corrections, and you can add words to your own dictionary.<br><br>
         <b>Scan:</b> click 📷 Scan, point your phone at the QR code, photograph pages on the phone and tap Send. Pages arrive here straightened and cleaned up. No phone? Use the webcam or clean up existing photos.<br><br>
         Password-protected PDFs can't be opened. Print them to a new PDF first.
       </div>
@@ -294,6 +307,8 @@ kbd{background:var(--kbd);border:1px solid var(--border);border-radius:4px;paddi
 <script src="lib/qrcode.min.js"></script>
 <script src="scan-core.js"></script>
 <script src="scan-ui.js"></script>
+<script src="spell.js"></script>
+<script src="spell-ui.js"></script>
 <script src="scan-desktop.js"></script>
 <script>
 if ("serviceWorker" in navigator && location.protocol.startsWith("http")) {

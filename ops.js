@@ -343,6 +343,6 @@ $('#btnPng').onclick = async () => {
   const c = document.createElement('canvas'); c.width = vp.width; c.height = vp.height;
   const ctx = c.getContext('2d');
   await page.render({ canvasContext: ctx, viewport: vp }).promise;
-  drawAnnots(ctx, curPageId(), 2, null);
+  drawAnnots(ctx, curPageId(), 2, null, { spell: false });
   c.toBlob(b => { downloadBytes(b, state.fileName.replace(/\.pdf$/i, '') + `-page${state.cur + 1}.png`, 'image/png'); }, 'image/png');
 };
