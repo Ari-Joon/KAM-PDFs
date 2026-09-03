@@ -1,5 +1,5 @@
 /* KAM PDFs service worker: caches the whole app so it works offline and can be installed as an app. */
-const VERSION = 'kam-pdfs-v1.5.1';
+const VERSION = 'kam-pdfs-v1.6.0';
 const FILES = [
   './', 'index.html', 'scan.html', 'core.js', 'annot.js', 'ops.js', 'scan-core.js', 'scan-ui.js', 'scan-desktop.js',
   'manifest.json', 'logo.svg', 'icons/icon-64.png', 'icons/icon-192.png', 'icons/icon-512.png',
