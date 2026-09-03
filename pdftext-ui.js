@@ -80,7 +80,69 @@
              w: r.w + 2 * padX, h, rot: r.rot, stroke: null, fill: a.bg, width: 0, opacity: 1 };
   }
 
-  function clearPick() { if (picked) { picked = null; pickedPage = -1; updateProps(); drawOverlay(); } }
+  /* ---------- selecting text with the mouse ---------- */
+  let sel = null;   // { page, aRun, aChar, bRun, bChar }
+  function clearSel() { if (sel) { sel = null; drawOverlay(); } }
+  function ordered() {
+    if (!sel) return null;
+    const a = { r: sel.aRun, c: sel.aChar }, b = { r: sel.bRun, c: sel.bChar };
+    return (a.r < b.r || (a.r === b.r && a.c <= b.c)) ? [a, b] : [b, a];
+  }
+  function selectedText() {
+    const o = ordered(); if (!o) return '';
+    const runs = KamPdfText.runsOf(sel.page); const [a, b] = o;
+    if (a.r === b.r) return (runs[a.r] || { text: '' }).text.slice(a.c, b.c);
+    const out = [];
+    for (let i = a.r; i <= b.r && i < runs.length; i++) {
+      const t = runs[i].text;
+      out.push(i === a.r ? t.slice(a.c) : i === b.r ? t.slice(0, b.c) : t);
+    }
+    return out.join('\n');
+  }
+  window.pdfTextDragStart = (x, y) => {
+    const pi = state.cur;
+    if (!KamPdfText.cached(pi)) { KamPdfText.index(pi).then(() => drawOverlay()).catch(() => { }); return false; }
+    const r = KamPdfText.runAt(pi, x, y);
+    if (!r) { clearSel(); return false; }
+    sel = { page: pi, aRun: r.idx, aChar: KamPdfText.charAt(r, x, y), bRun: r.idx, bChar: KamPdfText.charAt(r, x, y) };
+    return true;
+  };
+  window.pdfTextDragMove = (x, y) => {
+    if (!sel) return;
+    const r = KamPdfText.runAt(sel.page, x, y) || KamPdfText.nearestRun(sel.page, x, y);
+    if (!r) return;
+    sel.bRun = r.idx; sel.bChar = KamPdfText.charAt(r, x, y);
+  };
+  window.pdfTextDragEnd = () => {
+    if (!sel) return false;
+    const txt = selectedText();
+    if (!txt.trim()) { sel = null; return false; }
+    $('#hint').textContent = `${txt.length} characters selected · Ctrl+C to copy`;
+    return true;
+  };
+  window.pdfTextCopy = async () => {
+    const txt = selectedText();
+    if (!txt.trim()) return false;
+    try { await navigator.clipboard.writeText(txt); }
+    catch (e) {
+      // older browsers, or a page without clipboard permission
+      const ta = document.createElement('textarea');
+      ta.value = txt; ta.style.cssText = 'position:fixed;left:-9999px;top:0';
+      document.body.appendChild(ta); ta.select();
+      let ok = false; try { ok = document.execCommand('copy'); } catch (err) { }
+      ta.remove();
+      if (!ok) { toast('Could not reach the clipboard'); return false; }
+    }
+    toast(`Copied ${txt.length} characters`);
+    return true;
+  };
+  window.pdfTextHasSelection = () => !!(sel && selectedText().trim());
+  window.pdfTextSelectedText = () => selectedText();
+
+  function clearPick() {
+    clearSel();
+    if (picked) { picked = null; pickedPage = -1; updateProps(); drawOverlay(); }
+  }
   window.pdfTextClearPick = clearPick;
 
   /* ---------- hover, called from annot.js as the Select tool moves ---------- */
@@ -222,7 +284,22 @@
       ctx.strokeRect(-2 * s, -2 * s, (r.w + 4) * s, (r.h + 4) * s);
       ctx.restore();
     };
+    const o = ordered();
+    if (o && sel.page === state.cur) {
+      const runs = KamPdfText.runsOf(sel.page), [a, b] = o;
+      ctx.save(); ctx.fillStyle = 'rgba(59,130,246,.32)';
+      for (let i = a.r; i <= b.r && i < runs.length; i++) {
+        const r = runs[i];
+        const c0 = i === a.r ? a.c : 0, c1 = i === b.r ? b.c : r.text.length;
+        if (c1 <= c0) continue;
+        const ua = KamPdfText.uAt(r, c0) - r.u0, ub = KamPdfText.uAt(r, c1) - r.u0;
+        ctx.save(); ctx.translate(r.x * s, r.y * s); ctx.rotate(r.rot * Math.PI / 180);
+        ctx.fillRect(ua * s, -1 * s, (ub - ua) * s, (r.h + 2) * s);
+        ctx.restore();
+      }
+      ctx.restore();
+    }
     if (picked && pickedPage === state.cur && !editing) mark(picked, 'rgba(59,130,246,.20)', 'rgba(59,130,246,1)', false);
-    else if (hover && hoverPage === state.cur && state.tool === 'select' && !editing) mark(hover, 'rgba(59,130,246,.10)', 'rgba(59,130,246,.9)', true);
+    else if (hover && hoverPage === state.cur && state.tool === 'select' && !editing && !o) mark(hover, 'rgba(59,130,246,.10)', 'rgba(59,130,246,.9)', true);
   };
 })();

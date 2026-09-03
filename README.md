@@ -62,7 +62,12 @@ Unzip and open `index.html` in Chrome, Edge, Firefox, or Safari. Everything work
 
 **Edit the text that's already there**
 - Hover over any line of existing text and double-click to edit it in place, matched for position, size, font and colour
-- Delete a line by emptying it; Find (Ctrl+F) searches the whole document and steps through matches
+- Drag across text to select it and Ctrl+C to copy; click a line and press Delete to remove it
+- Find (Ctrl+F) searches the whole document and steps through matches
+
+**Redact and scan**
+- Redact permanently removes what is underneath: that page is rebuilt from a picture of itself, so the hidden words are not in the saved file at all
+- OCR reads the words off a scanned page and adds them to the saved PDF as an invisible layer, so the scan becomes searchable. It runs on your computer, like everything else
 
 **Annotate**
 - Text in Helvetica, Times, or Courier, bold, any size and colour
@@ -148,6 +153,8 @@ Phone scanner page: https://ari-joon.github.io/KAM-PDFs/scan.html
 | `Ctrl+C` `Ctrl+V` `Ctrl+D` | Copy, paste, duplicate the selected annotation |
 | Arrow keys | Nudge the selected annotation (Shift for 10x) |
 | `Ctrl+F` | Find in document (Enter / Shift+Enter to step) |
+| `X` | Redact tool |
+| `Ctrl+C` | Copy selected page text |
 | Double-click | Edit a line of existing text, or a text box you added |
 | `Ctrl+S` / `Ctrl+P` | Save PDF / print |
 | `←` `→` | Previous / next page (nothing selected) |
@@ -165,8 +172,12 @@ core.js                 loading, rendering, navigation, undo, theme
 annot.js                annotation tools and editing
 ops.js                  page operations, forms, metadata, export
 lib/                    pdf.js, pdf-lib, peerjs, qrcode (all bundled)
+lib/ocr/                Tesseract and its English data (loaded on first use)
 pdftext.js              index of the PDF's own text: positions, lines, search
-pdftext-ui.js           double-click-to-edit and the Find bar
+pdftext-ui.js           edit, select, delete existing text, and the Find bar
+ocr.js                  reading text off a scan (Tesseract, bundled)
+ocr-ui.js               the OCR buttons and the invisible text layer
+tests/run.js            the test suite: node tests/run.js
 spell.js                dictionary loading, checking and suggestions
 spell-ui.js             underlines and the spelling review dialog
 dict/en.txt             bundled English word list (loaded on first use)
@@ -183,8 +194,20 @@ Install KAM PDFs.bat    double-click installer (Windows)
 
 - Password-protected PDFs can't be opened. Open them in another viewer and "Print to PDF" first.
 - Editing existing text works line by line and keeps the same position. It uses one of the three built-in fonts, so a very unusual typeface will look slightly different after editing.
-- Whiteout hides text but does not remove it from the file, so don't rely on it for redacting sensitive information.
+- Whiteout and in-place text editing **hide** text, they do not delete it: the original words can still be extracted from the file. Use **Redact** when the text must actually be gone. The test suite asserts both behaviours so neither can drift.
+- A redacted page is rebuilt as an image, so it loses its own text layer and the file gets bigger. Other pages are untouched.
 - Covering a form field flattens the form when you save, because PDF viewers always paint fields on top of the page. Fields you don't draw over stay editable.
+
+## Tests
+
+```bash
+node tests/run.js
+```
+
+Twelve tests covering page operations, annotation fidelity, form fields, text editing,
+selection, find, spell checking, redaction, OCR, undo and the scanner. Needs Node 18+ and
+Chrome; nothing to install. See [tests/README.md](tests/README.md) for what each one checks
+and why one of them deliberately uses a second rendering engine.
 
 ## Licence
 

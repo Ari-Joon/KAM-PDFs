@@ -179,13 +179,14 @@ const propVis = {
   select: [], text: ['color', 'size', 'font', 'bold', 'opacity'], pen: ['color', 'width', 'opacity'],
   line: ['color', 'width', 'opacity'], arrow: ['color', 'width', 'opacity'],
   rect: ['color', 'fill', 'width', 'opacity'], ellipse: ['color', 'fill', 'width', 'opacity'],
-  highlight: ['color', 'opacity'], whiteout: [], image: ['opacity'],
+  highlight: ['color', 'opacity'], whiteout: [], redact: [], image: ['opacity'],
 };
 const hints = {
   select: 'Click an annotation to select it. Drag to move, corner square to resize, double-click text to edit.',
   text: 'Click to place text, or drag to draw a fixed-width box that wraps automatically. Enter starts a new line.', pen: 'Draw freehand.', highlight: 'Drag over text to highlight.',
   rect: 'Drag to draw a rectangle.', ellipse: 'Drag to draw an ellipse.', line: 'Drag to draw a line.',
   arrow: 'Drag to draw an arrow.', whiteout: 'Drag to cover an area with white.',
+  redact: 'Drag over anything that must not be readable. When you save, the text underneath is removed from the file, not just hidden.',
 };
 function setTool(t) {
   commitTextEdit();
@@ -200,7 +201,7 @@ function updateProps() {
   const a = state.selected;
   let vis;
   if (a) {
-    vis = propVis[a.pts ? (a.type === 'pen' ? 'pen' : 'line') : a.type === 'rect' && a.blend ? 'highlight' : a.type === 'rect' && !a.stroke && a.fill === '#ffffff' ? 'whiteout' : a.type] || [];
+    vis = propVis[a.pts ? (a.type === 'pen' ? 'pen' : 'line') : a.redact ? 'redact' : a.type === 'rect' && a.blend ? 'highlight' : a.type === 'rect' && !a.stroke && a.fill === '#ffffff' ? 'whiteout' : a.type] || [];
     if (a.type === 'text') { $('#pColor').value = a.color; $('#pSize').value = a.size; $('#pFont').value = a.font; $('#pBold').checked = !!a.bold; }
     else if (a.pts) { $('#pColor').value = a.color; $('#pWidth').value = a.width; }
     else if (a.type === 'rect' || a.type === 'ellipse') {
@@ -255,6 +256,7 @@ function newBox(type, x, y) {
   const base = { id: uid(), type, x, y, w: 0, h: 0, rot: 0, opacity: defaults.opacity };
   if (type === 'highlight') return Object.assign(base, { type: 'rect', fill: defaults.fill, stroke: null, width: 0, opacity: parseFloat($('#pOpacity').value) || 0.45, blend: 'multiply' });
   if (type === 'whiteout') return Object.assign(base, { type: 'rect', fill: '#ffffff', stroke: null, width: 0, opacity: 1 });
+  if (type === 'redact') return Object.assign(base, { type: 'rect', fill: '#000000', stroke: null, width: 0, opacity: 1, redact: true });
   return Object.assign(base, { stroke: defaults.color, fill: defaults.fillOn ? defaults.fill : null, width: defaults.width });
 }
 overlay.addEventListener('pointerdown', e => {
@@ -267,11 +269,17 @@ overlay.addEventListener('pointerdown', e => {
     if (state.selected && hitHandle(state.selected, x, y)) { pushAnnotUndo(curPageId()); drag = { mode: 'resize', a: state.selected, orig: { ...state.selected } }; return; }
     const a = hitTest(x, y);
     state.selected = a; updateProps();
-    // nothing of ours here: offer the PDF's own text instead, so it can be deleted or edited
-    if (!a && typeof pdfTextSelect === 'function') pdfTextSelect(x, y);
-    else if (a && typeof pdfTextClearPick === 'function') pdfTextClearPick();
+    if (a) {
+      if (typeof pdfTextClearPick === 'function') pdfTextClearPick();
+      pushAnnotUndo(curPageId());
+      drag = { mode: 'move', a, start: [x, y], orig: a.pts ? a.pts.map(p => [...p]) : { x: a.x, y: a.y } };
+    } else if (typeof pdfTextDragStart === 'function' && pdfTextDragStart(x, y)) {
+      // over the PDF's own text: a drag selects it, a plain click picks the line
+      drag = { mode: 'seltext', start: [x, y], moved: false };
+    } else if (typeof pdfTextSelect === 'function') {
+      pdfTextSelect(x, y);
+    }
     drawOverlay();
-    if (a) { pushAnnotUndo(curPageId()); drag = { mode: 'move', a, start: [x, y], orig: a.pts ? a.pts.map(p => [...p]) : { x: a.x, y: a.y } }; }
     return;
   }
   if (t === 'text') {
@@ -302,6 +310,10 @@ overlay.addEventListener('pointermove', e => {
   else if (drag.mode === 'line') { a.pts[1] = [x, y]; }
   else if (drag.mode === 'shape') { const [sx, sy] = drag.start; a.x = Math.min(sx, x); a.y = Math.min(sy, y); a.w = Math.abs(x - sx); a.h = Math.abs(y - sy); }
   else if (drag.mode === 'textbox') { drag.cur = [x, y]; }
+  else if (drag.mode === 'seltext') {
+    if (Math.hypot(x - drag.start[0], y - drag.start[1]) > 1.5) drag.moved = true;
+    if (drag.moved) pdfTextDragMove(x, y);
+  }
   else if (drag.mode === 'move') {
     const dx = x - drag.start[0], dy = y - drag.start[1];
     if (a.pts) a.pts = drag.orig.map(p => [p[0] + dx, p[1] + dy]); else { a.x = drag.orig.x + dx; a.y = drag.orig.y + dy; }
@@ -315,6 +327,13 @@ overlay.addEventListener('pointermove', e => {
 });
 function endDrag(e) {
   if (!drag) return;
+  if (drag.mode === 'seltext') {
+    const moved = drag.moved, start = drag.start; drag = null;
+    if (moved) pdfTextDragEnd();
+    else { pdfTextClearPick(); pdfTextSelect(start[0], start[1]); }
+    drawOverlay();
+    return;
+  }
   if (drag.mode === 'textbox') {
     const [sx, sy] = drag.start, [cx, cy] = drag.cur; drag = null;
     const wBox = Math.abs(cx - sx), fixed = wBox > 25;
@@ -448,6 +467,7 @@ document.addEventListener('keydown', e => {
   if (mod && k === 'z') { e.preventDefault(); undo(); return; }
   if (mod && k === 'y') { e.preventDefault(); redo(); return; }
   if (mod && k === 'c' && state.selected) { state.clipboard = JSON.stringify(state.selected); toast('Copied'); return; }
+  if (mod && k === 'c' && typeof pdfTextHasSelection === 'function' && pdfTextHasSelection()) { e.preventDefault(); pdfTextCopy(); return; }
   if (mod && k === 'v' && state.clipboard) { e.preventDefault(); pasteAnnot(JSON.parse(state.clipboard)); return; }
   if (mod && k === 'd' && state.selected) { e.preventDefault(); pasteAnnot(JSON.parse(JSON.stringify(state.selected))); return; }
   if (e.key === 'Escape') { state.selected = null; if (typeof pdfTextClearPick === 'function') pdfTextClearPick(); setTool('select'); return; }
@@ -459,7 +479,7 @@ document.addEventListener('keydown', e => {
   if (e.key.startsWith('Arrow') && state.selected) { e.preventDefault(); nudge(e.key, e.shiftKey ? 10 : 1); return; }
   if (e.key === 'ArrowLeft' || e.key === 'PageUp') { goTo(state.cur - 1); return; }
   if (e.key === 'ArrowRight' || e.key === 'PageDown') { goTo(state.cur + 1); return; }
-  const map = { v: 'select', t: 'text', p: 'pen', h: 'highlight', r: 'rect', e: 'ellipse', l: 'line', a: 'arrow', w: 'whiteout' };
+  const map = { v: 'select', t: 'text', p: 'pen', h: 'highlight', r: 'rect', e: 'ellipse', l: 'line', a: 'arrow', w: 'whiteout', x: 'redact' };
   if (!mod && !e.altKey && map[k]) setTool(map[k]);
 });
 // Paste an image from the clipboard straight onto the page.

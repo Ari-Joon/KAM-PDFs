@@ -205,6 +205,7 @@ kbd{background:var(--kbd);border:1px solid var(--border);border-radius:4px;paddi
         <button data-tool="line" title="Line (L)">╱ Line</button>
         <button data-tool="arrow" title="Arrow (A)">➚ Arrow</button>
         <button data-tool="whiteout" title="Cover an area with white (W)">▮ Whiteout</button>
+        <button data-tool="redact" title="Redact: permanently remove what is underneath (X)">⬛ Redact</button>
         <button id="btnImage" title="Insert image">🖼 Image</button>
         <button id="btnSign" title="Draw a signature">✍ Sign</button>
       </div>
@@ -261,6 +262,10 @@ kbd{background:var(--kbd);border:1px solid var(--border);border-radius:4px;paddi
       <div class="row"><input id="pnFormat" value="Page {n} of {total}" style="flex:1"><select id="pnPos"><option value="bottom">Bottom</option><option value="top">Top</option></select><button id="btnPageNums">Add</button></div>
       <h4>Text</h4>
       <div class="row"><button id="btnExtractText">Extract text of this page</button></div>
+      <h4>Scanned pages (OCR)</h4>
+      <div class="row"><button id="btnOcrPage">Read this page</button><button id="btnOcrAll">Read all pages</button></div>
+      <div id="ocrState" class="muted"></div>
+      <div class="muted">Finds the words in a scan and adds them to the saved PDF as an invisible layer, so it becomes searchable. Runs on your computer.</div>
       <h4>Spelling</h4>
       <div class="row"><label><input type="checkbox" id="spellUnderline" checked> Underline misspelled words</label></div>
       <div class="row"><button id="btnSpell">Check spelling</button><span id="spellState" class="muted"></span></div>
@@ -290,6 +295,9 @@ kbd{background:var(--kbd);border:1px solid var(--border);border-radius:4px;paddi
       <div class="muted" style="line-height:1.6">
         <b>Text:</b> click to place free text, or drag out a box first and the text wraps to that width. Drag the corner square to change the width. Double-click to edit. Paste an image from the clipboard with Ctrl+V.<br><br>
         Annotations are drawn on top of the page when you save. Whiteout only covers content visually; the underlying text stays in the file.<br><br>
+        <b>Redact:</b> the ⬛ Redact tool removes what is underneath. When you save, that page is rebuilt from a picture of itself, so the hidden words are not in the file at all. Whiteout only covers text; anyone can still extract it.<br><br>
+        <b>Select and copy:</b> drag across text already in the PDF to select it, then Ctrl+C. A single click picks a line so Delete can remove it.<br><br>
+        <b>Scanned pages:</b> "Read this page" under Scanned pages finds the words in a scan and adds them to the saved PDF as an invisible layer, so it becomes searchable. It runs on your computer.<br><br>
         <b>Edit existing text:</b> with the Select tool, hover over any text already in the PDF and it lights up. Double-click it to edit that line in place: the original is covered with the page's own background colour and replaced by a text box you can type in, matched for size and colour. Delete everything in the box to remove the line. <b>Find</b> (Ctrl+F) searches the whole document.<br><br>
         <b>Spelling:</b> misspelled words in text you add get a red dotted underline, and your browser underlines them while you type (right-click for its suggestions). "Check spelling" in the Document tab lists every one with corrections, and you can add words to your own dictionary.<br><br>
         <b>Scan:</b> click 📷 Scan, point your phone at the QR code, photograph pages on the phone and tap Send. Pages arrive here straightened and cleaned up. No phone? Use the webcam or clean up existing photos.<br><br>
@@ -318,6 +326,8 @@ kbd{background:var(--kbd);border:1px solid var(--border);border-radius:4px;paddi
 <script src="spell-ui.js"></script>
 <script src="pdftext.js"></script>
 <script src="pdftext-ui.js"></script>
+<script src="ocr.js"></script>
+<script src="ocr-ui.js"></script>
 <script src="scan-desktop.js"></script>
 <script>
 if ("serviceWorker" in navigator && location.protocol.startsWith("http")) {

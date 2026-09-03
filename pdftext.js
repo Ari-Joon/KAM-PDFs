@@ -40,8 +40,9 @@ const KamPdfText = (() => {
       });
     }
 
-    // group runs that share a baseline into lines
-    raw.sort((p, q) => (Math.round(p.rot) - Math.round(q.rot)) || (p.v - q.v) || (p.u0 - q.u0));
+    // Group runs that share a baseline into lines, in reading order. perp points up the
+    // glyphs, so a line higher on the page has the larger v: sort by descending v.
+    raw.sort((p, q) => (Math.round(p.rot) - Math.round(q.rot)) || (q.v - p.v) || (p.u0 - q.u0));
     const runs = []; let cur = null;
     for (const it of raw) {
       const tol = 0.45 * Math.max(it.size, cur ? cur.size : 0);
@@ -58,6 +59,7 @@ const KamPdfText = (() => {
         runs.push(cur);
       }
     }
+    runs.forEach((r, i) => { r.idx = i; });
     for (const r of runs) {
       // baseline start, then the box in annotation convention (top-left, w, h, rot)
       const asc = 0.78 * r.size;
@@ -65,6 +67,25 @@ const KamPdfText = (() => {
       r.x = r.base[0] + asc * r.perp[0]; r.y = r.base[1] + asc * r.perp[1];
       r.w = r.u1 - r.u0; r.h = r.size;
       r.text = r.text.replace(/\s+$/, '');
+    }
+    // A scan has no text of its own; if it has been through OCR, use those words instead so
+    // search and click-to-select work there too.
+    if (!runs.length && typeof ocrLinesFor === 'function') {
+      for (const l of ocrLinesFor(pi)) {
+        const first = l.words[0];
+        const line = { rot: 0, dir: [1, 0], perp: [0, -1], v: -first.y, u0: first.x, u1: first.x, size: l.h, h: l.h,
+                       w: 0, x: first.x, y: first.y, text: '', family: 'sans-serif', fontLabel: '', ocr: true,
+                       base: [first.x, first.y + l.h], parts: [] };
+        for (const w of l.words) {
+          if (line.text) line.text += ' ';
+          line.parts.push({ start: line.text.length, end: line.text.length + w.text.length, u0: w.x, u1: w.x + w.w });
+          line.text += w.text;
+          line.u1 = Math.max(line.u1, w.x + w.w);
+        }
+        line.w = line.u1 - line.u0;
+        runs.push(line);
+      }
+      runs.forEach((r, i) => { r.idx = i; });
     }
     const entry = { runs };
     pages.set(pi, entry);
@@ -105,5 +126,35 @@ const KamPdfText = (() => {
     return out;
   }
 
-  return { index, cached, runAt, uAt, local, search, reset };
+  /* Which character of a run sits under a point, for click-and-drag selection. */
+  function charAt(r, mx, my) {
+    const [lx] = local(r, mx, my);
+    const u = r.u0 + lx;
+    const parts = r.parts;
+    if (u <= parts[0].u0) return 0;
+    for (const p of parts) {
+      if (u <= p.u1) {
+        const span = p.u1 - p.u0 || 1;
+        const f = Math.max(0, Math.min(1, (u - p.u0) / span));
+        return p.start + Math.round(f * (p.end - p.start));
+      }
+    }
+    return r.text.length;
+  }
+  /* The run nearest a point, so a drag can run past the end of a line. */
+  function nearestRun(pi, mx, my) {
+    const e = cached(pi); if (!e || !e.runs.length) return null;
+    let best = null, bd = Infinity;
+    for (const r of e.runs) {
+      const [lx, ly] = local(r, mx, my);
+      const dx = lx < 0 ? -lx : lx > r.w ? lx - r.w : 0;
+      const dy = ly < 0 ? -ly : ly > r.h ? ly - r.h : 0;
+      const d = dy * 4 + dx;                     // prefer the right line, then along it
+      if (d < bd) { bd = d; best = r; }
+    }
+    return best;
+  }
+  const runsOf = pi => (cached(pi) || { runs: [] }).runs;
+
+  return { index, cached, runAt, uAt, local, search, reset, charAt, nearestRun, runsOf };
 })();

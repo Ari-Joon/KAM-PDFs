@@ -192,6 +192,7 @@ $('#btnExtractText').onclick = async () => {
     const tc = await page.getTextContent();
     let text = '';
     for (const it of tc.items) { text += it.str; if (it.hasEOL) text += '\n'; }
+    if (!text.trim() && typeof ocrTextFor === 'function') text = ocrTextFor(state.cur);
     showModal(`<h3>Text of page ${state.cur + 1}</h3><textarea id="extractedText"></textarea>
       <div class="row" style="margin-top:8px"><button id="copyText">Copy</button><button id="closeText">Close</button></div>`);
     $('#extractedText').value = text.trim() || '(No selectable text found. This page may be a scanned image.)';
@@ -320,10 +321,37 @@ async function annotsCoverAFormField() {
   return false;
 }
 
+/* Render a whole page, with everything we have added, to a bitmap. Used for redaction:
+   the page is rebuilt from this image, so the words underneath are gone from the file
+   rather than merely hidden. */
+async function rasterisePage(i, dpi = 180) {
+  const page = await state.pdfjs.getPage(i + 1);
+  const base = page.getViewport({ scale: 1 });
+  const scale = dpi / 72;
+  const vp = page.getViewport({ scale });
+  const c = document.createElement('canvas');
+  c.width = Math.round(vp.width); c.height = Math.round(vp.height);
+  const ctx = c.getContext('2d');
+  ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, c.width, c.height);
+  await page.render({ canvasContext: ctx, viewport: vp }).promise;
+  // make sure any inserted pictures have finished loading before they are baked in
+  const list = state.annots[state.pageIds[i]] || [];
+  await Promise.all(list.filter(a => a.type === 'image').map(a => new Promise(res => {
+    const im = getImg(a); if (im.complete) return res();
+    im.addEventListener('load', res, { once: true }); im.addEventListener('error', res, { once: true });
+  })));
+  drawAnnots(ctx, state.pageIds[i], scale, null, { spell: false });
+  return { canvas: c, w: base.width, h: base.height };
+}
+
 async function burnedDoc() {
   const doc = await PDFDocument.load(state.bytes, { ignoreEncryption: true, updateMetadata: false });
+  const redacted = [];
+  for (let i = 0; i < state.pageIds.length; i++)
+    if ((state.annots[state.pageIds[i]] || []).some(a => a.redact)) redacted.push(i);
+  const fieldCount = (() => { try { return doc.getForm().getFields().length; } catch (e) { return 0; } })();
   // Must happen before anything of ours is drawn, so our marks end up on top.
-  if ($('#flattenForm').checked || await annotsCoverAFormField()) {
+  if ($('#flattenForm').checked || (fieldCount && redacted.length) || await annotsCoverAFormField()) {
     try {
       const form = doc.getForm();
       if (form.getFields().length) {
@@ -337,13 +365,34 @@ async function burnedDoc() {
   const fontNames = { Helvetica: ['Helvetica', 'HelveticaBold'], TimesRoman: ['TimesRoman', 'TimesRomanBold'], Courier: ['Courier', 'CourierBold'] };
   const getFont = async a => { const k = a.font + (a.bold ? 'B' : ''); if (!fonts[k]) fonts[k] = await doc.embedFont(StandardFonts[fontNames[a.font][a.bold ? 1 : 0]]); return fonts[k]; };
   const getImage = async a => { if (!imgs[a.src]) { const b = await (await fetch(a.src)).arrayBuffer(); imgs[a.src] = a.fmt === 'jpg' ? await doc.embedJpg(b) : await doc.embedPng(b); } return imgs[a.src]; };
+  /* Words read off a scan go in as invisible text over the picture, which is what makes a
+     scanned PDF searchable and selectable in any viewer. */
+  async function addOcrLayer(page, i, toU, R) {
+    const words = (typeof ocrWordsFor === 'function' ? ocrWordsFor(i) : []) || [];
+    if (!words.length) return;
+    const font = await getFont({ font: 'Helvetica', bold: false });
+    for (const w of words) {
+      const txt = sanitizeForFont(w.text, font).trim();
+      if (!txt) continue;
+      let size = Math.max(1, w.h * 0.82);
+      // keep the hidden word inside its box, so selecting it in a viewer lands where the
+      // picture shows the word
+      try { const nat = font.widthOfTextAtSize(txt, size); if (nat > w.w && nat > 0) size *= w.w / nat; } catch (e) { }
+      const at = toU(w.x, w.y + w.h * 0.86);            // baseline near the bottom of the box
+      page.drawText(txt, { x: at.x, y: at.y, size: Math.max(0.5, size), font, opacity: 0, rotate: degrees(R) });
+    }
+  }
+
   for (let i = 0; i < state.pageIds.length; i++) {
+    if (redacted.includes(i)) continue;                 // rebuilt from a bitmap further down
     const list = (state.annots[state.pageIds[i]] || []).filter(a => !(a.type === 'text' && !a.text.trim()));
-    if (!list.length) continue;
+    const ocrWords = (typeof ocrWordsFor === 'function' ? ocrWordsFor(i) : []) || [];
+    if (!list.length && !ocrWords.length) continue;
     const page = doc.getPage(i);
     const vp = (await state.pdfjs.getPage(i + 1)).getViewport({ scale: 1 });
     const R = vp.rotation;
     const toU = (x, y) => { const [ux, uy] = vp.convertToPdfPoint(x, y); return { x: ux, y: uy }; };
+    await addOcrLayer(page, i, toU, R);
     for (const a of list) {
       const op = a.opacity == null ? 1 : a.opacity;
       if (a.pts) {
@@ -373,7 +422,29 @@ async function burnedDoc() {
       }
     }
   }
-  return doc;
+
+  if (!redacted.length) return doc;
+
+  /* Redacted pages are rebuilt from a picture of themselves, so the words behind the black
+     boxes are not in the file at all. Then everything is copied into a fresh document: only
+     what the new pages reference comes across, which leaves the original page contents behind. */
+  for (const i of redacted) {
+    const { canvas, w, h } = await rasterisePage(i);
+    const blob = await new Promise(r => canvas.toBlob(r, 'image/jpeg', 0.92));
+    const img = await doc.embedJpg(await blob.arrayBuffer());
+    doc.removePage(i);
+    doc.insertPage(i, [w, h]).drawImage(img, { x: 0, y: 0, width: w, height: h });
+  }
+  const clean = await PDFDocument.create();
+  const copied = await clean.copyPages(doc, doc.getPageIndices());
+  copied.forEach(p => clean.addPage(p));
+  try {
+    const t = doc.getTitle(), a = doc.getAuthor(), s = doc.getSubject(), k = doc.getKeywords();
+    if (t) clean.setTitle(t); if (a) clean.setAuthor(a); if (s) clean.setSubject(s);
+    if (k) clean.setKeywords(k.split(/,\s*/).filter(Boolean));
+  } catch (e) { }
+  clean.setProducer('KAM PDFs'); clean.setModificationDate(new Date());
+  return clean;
 }
 async function exportBytes() {
   const doc = await burnedDoc();   // handles flattening itself, before drawing
