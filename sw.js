@@ -1,5 +1,5 @@
 /* KAM PDFs service worker: caches the whole app so it works offline and can be installed as an app. */
-const VERSION = 'kam-pdfs-v1.6.0';
+const VERSION = 'kam-pdfs-v1.6.1';
 const FILES = [
   './', 'index.html', 'scan.html', 'core.js', 'annot.js', 'ops.js', 'scan-core.js', 'scan-ui.js', 'scan-desktop.js',
   'manifest.json', 'logo.svg', 'icons/icon-64.png', 'icons/icon-192.png', 'icons/icon-512.png',
@@ -11,10 +11,16 @@ self.addEventListener('install', e => {
 self.addEventListener('activate', e => {
   e.waitUntil(caches.keys().then(keys => Promise.all(keys.filter(k => k !== VERSION).map(k => caches.delete(k)))).then(() => self.clients.claim()));
 });
+const save = (req, res) => { if (res.ok) { const copy = res.clone(); caches.open(VERSION).then(c => c.put(req, copy)); } return res; };
 self.addEventListener('fetch', e => {
   if (e.request.method !== 'GET' || !e.request.url.startsWith(self.location.origin)) return;
-  e.respondWith(caches.match(e.request, { ignoreSearch: true }).then(hit => hit || fetch(e.request).then(res => {
-    if (res.ok) { const copy = res.clone(); caches.open(VERSION).then(c => c.put(e.request, copy)); }
-    return res;
-  })));
+  // Branding files change independently of the app code. Always try the network for them,
+  // so an installed app can never pick up stale artwork, and fall back to cache offline.
+  if (/\/icons\/|manifest\.json$|logo\.(svg|ico)$/.test(new URL(e.request.url).pathname)) {
+    e.respondWith(fetch(e.request).then(res => save(e.request, res))
+      .catch(() => caches.match(e.request, { ignoreSearch: true })));
+    return;
+  }
+  e.respondWith(caches.match(e.request, { ignoreSearch: true })
+    .then(hit => hit || fetch(e.request).then(res => save(e.request, res))));
 });

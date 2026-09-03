@@ -35,9 +35,11 @@ function Find-InstalledWebApp {
       $webApps = Join-Path $prof.FullName 'Web Applications'
       if (-not (Test-Path $webApps)) { continue }
       foreach ($app in (Get-ChildItem $webApps -Directory -Filter '_crx_*' -ErrorAction SilentlyContinue)) {
-        $ico = Join-Path $app.FullName 'KAM PDFs.ico'
-        if (Test-Path $ico) {
-          return @{ Proxy = $proxy; Profile = $prof.Name; AppId = $app.Name.Substring(5); Icon = $ico }
+        # Browsers name the generated icon after the app title, but not always, so match on the prefix.
+        $ico = Get-ChildItem $app.FullName -Filter 'KAM PDFs*' -File -ErrorAction SilentlyContinue |
+               Sort-Object Length -Descending | Select-Object -First 1
+        if ($ico) {
+          return @{ Proxy = $proxy; Profile = $prof.Name; AppId = $app.Name.Substring(5); Icon = $ico.FullName }
         }
       }
     }
