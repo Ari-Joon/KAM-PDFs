@@ -1,5 +1,5 @@
 /* KAM PDFs service worker: caches the whole app so it works offline and can be installed as an app. */
-const VERSION = 'kam-pdfs-v1.8.0';
+const VERSION = 'kam-pdfs-v1.8.1';
 // dict/en.txt is deliberately not precached: it is large and only fetched when spell
 // checking is first used, after which the fetch handler below keeps it for offline use.
 const FILES = [

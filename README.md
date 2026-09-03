@@ -183,7 +183,8 @@ Install KAM PDFs.bat    double-click installer (Windows)
 
 - Password-protected PDFs can't be opened. Open them in another viewer and "Print to PDF" first.
 - Editing existing text works line by line and keeps the same position. It uses one of the three built-in fonts, so a very unusual typeface will look slightly different after editing.
-- Whiteout is visual only. The original text is still inside the file, so don't rely on it for redacting sensitive information.
+- Whiteout hides text but does not remove it from the file, so don't rely on it for redacting sensitive information.
+- Covering a form field flattens the form when you save, because PDF viewers always paint fields on top of the page. Fields you don't draw over stay editable.
 
 ## Licence
 

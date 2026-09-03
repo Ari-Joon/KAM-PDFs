@@ -266,7 +266,11 @@ overlay.addEventListener('pointerdown', e => {
   if (t === 'select') {
     if (state.selected && hitHandle(state.selected, x, y)) { pushAnnotUndo(curPageId()); drag = { mode: 'resize', a: state.selected, orig: { ...state.selected } }; return; }
     const a = hitTest(x, y);
-    state.selected = a; updateProps(); drawOverlay();
+    state.selected = a; updateProps();
+    // nothing of ours here: offer the PDF's own text instead, so it can be deleted or edited
+    if (!a && typeof pdfTextSelect === 'function') pdfTextSelect(x, y);
+    else if (a && typeof pdfTextClearPick === 'function') pdfTextClearPick();
+    drawOverlay();
     if (a) { pushAnnotUndo(curPageId()); drag = { mode: 'move', a, start: [x, y], orig: a.pts ? a.pts.map(p => [...p]) : { x: a.x, y: a.y } }; }
     return;
   }
@@ -436,7 +440,7 @@ function nudge(key, d) {
 document.addEventListener('keydown', e => {
   const typing = ['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement.tagName);
   const mod = e.ctrlKey || e.metaKey, k = e.key.toLowerCase();
-  if (mod && k === 's') { e.preventDefault(); savePdf(); return; }
+  if (mod && k === 's') { e.preventDefault(); savePdf(e.shiftKey); return; }
   if (mod && k === 'o') { e.preventDefault(); $('#fileInput').click(); return; }
   if (mod && k === 'p') { e.preventDefault(); $('#btnPrint').click(); return; }
   if (typing) return;
@@ -446,8 +450,12 @@ document.addEventListener('keydown', e => {
   if (mod && k === 'c' && state.selected) { state.clipboard = JSON.stringify(state.selected); toast('Copied'); return; }
   if (mod && k === 'v' && state.clipboard) { e.preventDefault(); pasteAnnot(JSON.parse(state.clipboard)); return; }
   if (mod && k === 'd' && state.selected) { e.preventDefault(); pasteAnnot(JSON.parse(JSON.stringify(state.selected))); return; }
-  if (e.key === 'Escape') { state.selected = null; setTool('select'); return; }
-  if (e.key === 'Delete' || e.key === 'Backspace') { if (state.selected) { e.preventDefault(); deleteSelected(); } return; }
+  if (e.key === 'Escape') { state.selected = null; if (typeof pdfTextClearPick === 'function') pdfTextClearPick(); setTool('select'); return; }
+  if (e.key === 'Delete' || e.key === 'Backspace') {
+    if (state.selected) { e.preventDefault(); deleteSelected(); return; }
+    if (typeof pdfTextDeleteSelected === 'function' && pdfTextDeleteSelected()) e.preventDefault();
+    return;
+  }
   if (e.key.startsWith('Arrow') && state.selected) { e.preventDefault(); nudge(e.key, e.shiftKey ? 10 : 1); return; }
   if (e.key === 'ArrowLeft' || e.key === 'PageUp') { goTo(state.cur - 1); return; }
   if (e.key === 'ArrowRight' || e.key === 'PageDown') { goTo(state.cur + 1); return; }

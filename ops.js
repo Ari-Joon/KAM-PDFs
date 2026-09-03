@@ -263,13 +263,76 @@ $('#btnApplyForm').onclick = () => structOp(async () => {
 }, { clearThumbs: true });
 
 /* ---------- export: burn annotations into a copy ---------- */
+/* The built-in fonts cover WinAnsi only, but PDFs are full of curly quotes, real dashes and
+   ligatures. Map those to something the font can draw so saved text matches what you typed. */
+const NEAREST = {
+  '‘': "'", '’': "'", '‚': ',', '‛': "'", '′': "'", 'ʼ': "'", '´': "'",
+  '“': '"', '”': '"', '„': '"', '″': '"', '«': '"', '»': '"',
+  '‐': '-', '‑': '-', '‒': '-', '–': '-', '—': '-', '―': '-', '−': '-',
+  ' ': ' ', ' ': ' ', ' ': ' ', ' ': ' ', ' ': ' ', ' ': ' ', '　': ' ',
+  '​': '', '‌': '', '‍': '', '­': '', '﻿': '',
+  '…': '...', '•': '-', '·': '-', '⁃': '-', '●': '-', '▪': '-',
+  'ﬀ': 'ff', 'ﬁ': 'fi', 'ﬂ': 'fl', 'ﬃ': 'ffi', 'ﬄ': 'ffl', 'œ': 'oe', 'Œ': 'OE',
+  '⁄': '/', '∕': '/', '˜': '~', 'Ł': 'L', 'ł': 'l',
+};
+const NEAREST_RE = new RegExp('[' + Object.keys(NEAREST).join('') + ']', 'g');
 function sanitizeForFont(text, font) {
   let out = '';
-  for (const ch of text) { if (ch === '\n') { out += ch; continue; } try { font.encodeText(ch); out += ch; } catch (e) { out += '?'; } }
+  for (const ch of text.replace(NEAREST_RE, c => NEAREST[c])) {
+    if (ch === '\n') { out += ch; continue; }
+    try { font.encodeText(ch); out += ch; } catch (e) { out += '?'; }
+  }
   return out;
 }
+/* Axis-aligned box for one of our annotations, in display points. */
+function annotBox(a) {
+  if (a.pts) { const b = bounds(a); return { x: b.x, y: b.y, X: b.x + b.w, Y: b.y + b.h }; }
+  const t = a.rot * Math.PI / 180, c = Math.cos(t), s = Math.sin(t);
+  const pts = [[0, 0], [a.w, 0], [a.w, a.h], [0, a.h]].map(([lx, ly]) => [a.x + lx * c - ly * s, a.y + lx * s + ly * c]);
+  const xs = pts.map(p => p[0]), ys = pts.map(p => p[1]);
+  return { x: Math.min(...xs), y: Math.min(...ys), X: Math.max(...xs), Y: Math.max(...ys) };
+}
+
+/* Form fields are drawn on top of the page by every PDF viewer, so anything we put over a
+   field would slide underneath it in the saved file even though it looks right on screen.
+   When that happens the fields have to be flattened into the page first. */
+async function annotsCoverAFormField() {
+  for (let i = 0; i < state.pageIds.length; i++) {
+    const list = (state.annots[state.pageIds[i]] || []).filter(a => !(a.type === 'text' && !a.text.trim()));
+    if (!list.length) continue;
+    let page, widgets;
+    try {
+      page = await state.pdfjs.getPage(i + 1);
+      widgets = (await page.getAnnotations()).filter(w => w.subtype === 'Widget' && w.rect);
+    } catch (e) { continue; }
+    if (!widgets.length) continue;
+    const vp = page.getViewport({ scale: 1 });
+    const boxes = widgets.map(w => {
+      const [x1, y1] = vp.convertToViewportPoint(w.rect[0], w.rect[1]);
+      const [x2, y2] = vp.convertToViewportPoint(w.rect[2], w.rect[3]);
+      return { x: Math.min(x1, x2), y: Math.min(y1, y2), X: Math.max(x1, x2), Y: Math.max(y1, y2) };
+    });
+    for (const a of list) {
+      const b = annotBox(a);
+      if (boxes.some(w => b.x < w.X && b.X > w.x && b.y < w.Y && b.Y > w.y)) return true;
+    }
+  }
+  return false;
+}
+
 async function burnedDoc() {
   const doc = await PDFDocument.load(state.bytes, { ignoreEncryption: true, updateMetadata: false });
+  // Must happen before anything of ours is drawn, so our marks end up on top.
+  if ($('#flattenForm').checked || await annotsCoverAFormField()) {
+    try {
+      const form = doc.getForm();
+      if (form.getFields().length) {
+        try { form.updateFieldAppearances(); } catch (e) { }
+        form.flatten();
+        if (!$('#flattenForm').checked) toast('Form fields were merged into the page so your marks stay on top.', 5000);
+      }
+    } catch (e) { console.warn('flatten failed', e); }
+  }
   const fonts = {}, imgs = {};
   const fontNames = { Helvetica: ['Helvetica', 'HelveticaBold'], TimesRoman: ['TimesRoman', 'TimesRomanBold'], Courier: ['Courier', 'CourierBold'] };
   const getFont = async a => { const k = a.font + (a.bold ? 'B' : ''); if (!fonts[k]) fonts[k] = await doc.embedFont(StandardFonts[fontNames[a.font][a.bold ? 1 : 0]]); return fonts[k]; };
@@ -313,18 +376,43 @@ async function burnedDoc() {
   return doc;
 }
 async function exportBytes() {
-  const doc = await burnedDoc();
-  if ($('#flattenForm').checked) { try { doc.getForm().flatten(); } catch (e) { console.warn('flatten failed', e); } }
+  const doc = await burnedDoc();   // handles flattening itself, before drawing
   return doc.save();
 }
-async function savePdf() {
+/* Where the last save went, so Save writes over the same file instead of leaving you with
+   "document-edited (3).pdf" and no idea which one is current. */
+let saveTarget = null;
+window.resetSaveTarget = () => { saveTarget = null; };
+async function savePdf(saveAs) {
   if (!state.doc) return toast('Open a PDF first');
-  commitTextEdit(); busy(true);
-  try { downloadBytes(await exportBytes(), outName()); state.dirty = false; toast('Saved ' + outName()); }
-  catch (e) { console.error(e); toast('Save failed: ' + e.message, 6000); }
+  commitTextEdit();
+  const canPick = typeof window.showSaveFilePicker === 'function';
+  let handle = saveAs ? null : saveTarget;
+  try {
+    if (canPick && !handle) {
+      handle = await window.showSaveFilePicker({
+        suggestedName: outName(),
+        types: [{ description: 'PDF document', accept: { 'application/pdf': ['.pdf'] } }],
+      });
+    }
+  } catch (e) { if (e && e.name === 'AbortError') return; console.warn(e); handle = null; }
+  busy(true);
+  try {
+    const bytes = await exportBytes();
+    if (handle) {
+      const w = await handle.createWritable();
+      await w.write(bytes); await w.close();
+      saveTarget = handle; state.dirty = false;
+      toast('Saved ' + handle.name);
+    } else {
+      downloadBytes(bytes, outName()); state.dirty = false;
+      toast('Saved ' + outName());
+    }
+  } catch (e) { console.error(e); toast('Save failed: ' + e.message, 6000); }
   busy(false);
 }
-$('#btnSave').onclick = $('#btnSave2').onclick = savePdf;
+$('#btnSave').onclick = $('#btnSave2').onclick = () => savePdf(false);
+$('#btnSaveAs').onclick = () => savePdf(true);
 $('#btnPrint').onclick = async () => {
   if (!state.doc) return toast('Open a PDF first');
   commitTextEdit(); busy(true);

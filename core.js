@@ -65,6 +65,7 @@ async function openBytes(bytes, name) {
     state.pageIds = doc.getPages().map(() => uid());
     state.annots = {}; state.undo = []; state.thumbCache.clear();
     state.cur = 0; state.selectedPages.clear(); state.selected = null;
+    if (typeof resetSaveTarget === 'function') resetSaveTarget();
     await rebuild();
     $('#empty').classList.add('hide');
     loadFormFields(); loadMetadata();

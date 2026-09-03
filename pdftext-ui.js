@@ -1,13 +1,14 @@
-/* KAM PDFs - editing the text that is already in the PDF, and Find.
-   Double-click a line of existing text: it is covered with a patch of the page's own
-   background colour and replaced by an editable text box in the same place, size and colour. */
+/* KAM PDFs - working with the text that is already in the PDF: click to select, Delete to
+   remove, double-click to edit in place, and Find. The original line is covered with a patch
+   of the page's own background colour; the replacement keeps the original size and baseline. */
 'use strict';
 (() => {
-  let hover = null, hoverPage = -1;
+  let hover = null, hoverPage = -1;     // line under the cursor
+  let picked = null, pickedPage = -1;   // line clicked, awaiting Delete or a double-click
 
-  /* ---------- helpers ---------- */
   const hex = ([r, g, b]) => '#' + [r, g, b].map(v => Math.round(v).toString(16).padStart(2, '0')).join('');
-  const dist = (p, q) => Math.hypot(p[0] - q[0], p[1] - q[1], p[2] - q[2]);
+  const gap = (p, q) => Math.abs(p[0] - q[0]) + Math.abs(p[1] - q[1]) + Math.abs(p[2] - q[2]);
+  const lum = ([r, g, b]) => 0.299 * r + 0.587 * g + 0.114 * b;
   function median(list) {
     if (!list.length) return null;
     const ch = i => list.map(p => p[i]).sort((a, b) => a - b)[Math.floor(list.length / 2)];
@@ -16,72 +17,137 @@
   function fontFor(r) {
     const lbl = r.fontLabel || '';
     if (/courier|mono|consolas|menlo/i.test(lbl) || /mono/.test(r.family)) return 'Courier';
-    if (/times|georgia|garamond|cambria|book|roman|serif/i.test(lbl) && !/sans/i.test(lbl)) return 'TimesRoman';
+    if (/times|georgia|garamond|cambria|book|roman|minion|serif/i.test(lbl) && !/sans/i.test(lbl)) return 'TimesRoman';
     if (r.family === 'serif' && !/arial|helvetica|calibri|verdana|segoe|tahoma/i.test(lbl)) return 'TimesRoman';
     return 'Helvetica';
   }
 
-  /* Read the page's own pixels around and inside the run: background = what surrounds it,
-     text colour = the pixel inside that differs most from that background. */
-  function sampleColours(r) {
-    const fallback = { bg: '#ffffff', fg: '#000000' };
-    const cv = $('#pageCanvas'); if (!cv.width || !state.pageSize.w) return fallback;
-    const k = cv.width / state.pageSize.w;                    // canvas pixels per point
+  /* Read the page's own pixels around a line: the background colour, the ink colour, and how
+     far the ink actually reaches. Measuring the ink matters because font metrics are only a
+     guess: a descender or an accent left uncovered shows through as a ghost under the new text. */
+  function analyse(r) {
+    const plain = { bg: '#ffffff', fg: '#000000', top: -1.5, bottom: r.h + 1.5 };
+    const cv = $('#pageCanvas'); if (!cv.width || !state.pageSize.w) return plain;
+    const k = cv.width / state.pageSize.w;
     const t = r.rot * Math.PI / 180, c = Math.cos(t), sn = Math.sin(t);
     const toPx = (lx, ly) => [Math.round((r.x + lx * c - ly * sn) * k), Math.round((r.y + lx * sn + ly * c) * k)];
-    const corners = [[-4, -4], [r.w + 4, -4], [r.w + 4, r.h + 4], [-4, r.h + 4]].map(p => toPx(...p));
-    const minX = Math.max(0, Math.min(...corners.map(p => p[0]))), maxX = Math.min(cv.width - 1, Math.max(...corners.map(p => p[0])));
-    const minY = Math.max(0, Math.min(...corners.map(p => p[1]))), maxY = Math.min(cv.height - 1, Math.max(...corners.map(p => p[1])));
-    const W = maxX - minX + 1, H = maxY - minY + 1; if (W < 1 || H < 1) return fallback;
-    let img; try { img = cv.getContext('2d').getImageData(minX, minY, W, H).data; } catch (e) { return fallback; }
-    const at = (px, py) => (px < minX || px > maxX || py < minY || py > maxY) ? null : (i => [img[i], img[i + 1], img[i + 2]])(((py - minY) * W + (px - minX)) * 4);
+    const box = [[-5, -5], [r.w + 5, -5], [r.w + 5, r.h + 5], [-5, r.h + 5]].map(p => toPx(...p));
+    const minX = Math.max(0, Math.min(...box.map(p => p[0]))), maxX = Math.min(cv.width - 1, Math.max(...box.map(p => p[0])));
+    const minY = Math.max(0, Math.min(...box.map(p => p[1]))), maxY = Math.min(cv.height - 1, Math.max(...box.map(p => p[1])));
+    const W = maxX - minX + 1, H = maxY - minY + 1; if (W < 2 || H < 2) return plain;
+    let img; try { img = cv.getContext('2d').getImageData(minX, minY, W, H).data; } catch (e) { return plain; }
+    const at = (px, py) => (px < minX || px > maxX || py < minY || py > maxY) ? null
+      : (i => [img[i], img[i + 1], img[i + 2]])(((py - minY) * W + (px - minX)) * 4);
+
     const bgs = [], step = Math.max(1, r.w / 24);
-    for (let lx = -2; lx <= r.w + 2; lx += step) for (const ly of [-3, r.h + 3]) { const p = at(...toPx(lx, ly)); if (p) bgs.push(p); }
+    for (let lx = -3; lx <= r.w + 3; lx += step) for (const ly of [-4, r.h + 4]) { const p = at(...toPx(lx, ly)); if (p) bgs.push(p); }
     let bg = median(bgs) || [255, 255, 255];
-    if (bg.every(v => v > 242)) bg = [255, 255, 255];
-    let fg = null, best = -1; const sx = Math.max(0.4, r.w / 80), sy = Math.max(0.4, r.h / 12);
-    for (let lx = 0; lx <= r.w; lx += sx) for (let ly = 0; ly <= r.h; ly += sy) { const p = at(...toPx(lx, ly)); if (!p) continue; const d = dist(p, bg); if (d > best) { best = d; fg = p; } }
-    if (!fg || best < 60) fg = bg[0] + bg[1] + bg[2] > 380 ? [0, 0, 0] : [255, 255, 255];
-    return { bg: hex(bg), fg: hex(fg) };
+    if (bg.every(v => v > 240)) bg = [255, 255, 255];              // near-white paper: use pure white
+
+    let fg = null, best = -1;
+    const sx = Math.max(0.4, r.w / 90), sy = Math.max(0.35, r.h / 14);
+    for (let lx = 0; lx <= r.w; lx += sx) for (let ly = 0; ly <= r.h; ly += sy) {
+      const p = at(...toPx(lx, ly)); if (!p) continue;
+      const d = gap(p, bg); if (d > best) { best = d; fg = p; }
+    }
+    if (!fg || best < 60) fg = lum(bg) > 140 ? [0, 0, 0] : [255, 255, 255];
+    // a cover the same colour as the ink would hide nothing useful: fall back to the paper
+    if (gap(bg, fg) < 40) { bg = lum(fg) > 140 ? [0, 0, 0] : [255, 255, 255]; }
+
+    // walk out from the middle of the line while there is still ink, stopping at clear rows so
+    // we never reach into the line above or below
+    const cols = []; for (let i = 0; i <= 40; i++) cols.push(r.w * i / 40);
+    const inked = ly => cols.some(lx => { const p = at(...toPx(lx, ly)); return p && gap(p, bg) > 45; });
+    const walk = dir => {
+      let last = r.h / 2, blanks = 0;
+      for (let d = 0.3; d <= 0.55 * r.h + 2; d += 0.3) {
+        const ly = r.h / 2 + dir * d;
+        if (inked(ly)) { last = ly; blanks = 0; } else if (++blanks >= 3) break;
+      }
+      return last;
+    };
+    const top = Math.max(-0.5 * r.h - 1, Math.min(0, walk(-1) - 1));
+    const bottom = Math.min(1.5 * r.h + 1, Math.max(r.h, walk(1) + 1));
+    return { bg: hex(bg), fg: hex(fg), top, bottom };
   }
 
-  /* ---------- hover (called from annot.js while the Select tool moves) ---------- */
+  /* The patch that hides a line of original text, sized to the ink we measured. */
+  function coverFor(r, a) {
+    const t = r.rot * Math.PI / 180, c = Math.cos(t), sn = Math.sin(t);
+    const padX = 0.6, top = a.top, h = a.bottom - a.top;
+    return { id: uid(), type: 'rect',
+             x: r.x - padX * c - top * sn, y: r.y - padX * sn + top * c,
+             w: r.w + 2 * padX, h, rot: r.rot, stroke: null, fill: a.bg, width: 0, opacity: 1 };
+  }
+
+  function clearPick() { if (picked) { picked = null; pickedPage = -1; updateProps(); drawOverlay(); } }
+  window.pdfTextClearPick = clearPick;
+
+  /* ---------- hover, called from annot.js as the Select tool moves ---------- */
   window.pdfTextHover = (x, y, allow) => {
     const pi = state.cur;
     let r = null;
     if (allow && !editing) {
       const e = KamPdfText.cached(pi);
-      if (!e) { KamPdfText.index(pi).catch(() => { }); }
+      if (!e) KamPdfText.index(pi).then(() => drawOverlay()).catch(() => { });
       else r = KamPdfText.runAt(pi, x, y);
     }
     if (r !== hover || hoverPage !== pi) {
       hover = r; hoverPage = pi; drawOverlay();
-      if (r) $('#hint').textContent = 'Double-click to edit this text'; else updateProps();
+      if (r && !picked) $('#hint').textContent = 'Click to select this text, double-click to edit it';
+      else if (!picked) updateProps();
     }
     return !!r;
   };
 
-  /* ---------- double-click: turn a line of PDF text into an editable one ---------- */
+  /* ---------- single click: pick a line so it can be deleted ---------- */
+  window.pdfTextSelect = (x, y) => {
+    const pi = state.cur;
+    const e = KamPdfText.cached(pi);
+    if (!e) { KamPdfText.index(pi).then(() => drawOverlay()).catch(() => { }); clearPick(); return false; }
+    const r = KamPdfText.runAt(pi, x, y);
+    picked = r; pickedPage = pi;
+    $('#hint').textContent = r ? 'Press Delete to remove this text, or double-click to edit it' : '';
+    if (!r) updateProps();
+    drawOverlay();
+    return !!r;
+  };
+
+  /* ---------- Delete: cover the picked line so it disappears ---------- */
+  window.pdfTextDeleteSelected = () => {
+    if (!picked || pickedPage !== state.cur) return false;
+    const r = picked;
+    pushAnnotUndo(state.pageIds[state.cur]);
+    curAnnots().push(coverFor(r, analyse(r)));
+    picked = null; hover = null;
+    drawOverlay(); refreshThumb(state.cur); updateProps();
+    toast('Text removed. Ctrl+Z puts it back.');
+    return true;
+  };
+
+  /* ---------- double-click: make a line of PDF text editable ---------- */
   window.pdfTextEditAt = async (x, y) => {
     if (!state.doc) return false;
     const pi = state.cur;
     await KamPdfText.index(pi);
     const r = KamPdfText.runAt(pi, x, y);
     if (!r) return false;
-    const { bg, fg } = sampleColours(r);
+    const look = analyse(r);
     pushAnnotUndo(state.pageIds[pi]);
-    const pad = 1.5, t = r.rot * Math.PI / 180, c = Math.cos(t), sn = Math.sin(t);
-    const cover = { id: uid(), type: 'rect', x: r.x - pad * c + pad * sn, y: r.y - pad * sn - pad * c, w: r.w + 2 * pad, h: r.h + 2 * pad, rot: r.rot, stroke: null, fill: bg, width: 0, opacity: 1 };
-    const txt = { id: uid(), type: 'text', x: 0, y: 0, w: 0, h: 0, rot: r.rot, text: r.text, size: r.size, font: fontFor(r), bold: /bold|black|heavy|semibold|demi/i.test(r.fontLabel), color: fg, opacity: 1 };
-    const place = () => { txt.x = r.base[0] + 0.9 * txt.size * r.perp[0]; txt.y = r.base[1] + 0.9 * txt.size * r.perp[1]; measureText(txt); };
-    place();
-    // our font is not the PDF's font: if the line comes out wider than the original, shrink to fit the same space
-    if (txt.w > r.w * 1.03 && r.w > 5) { txt.size = Math.max(4, Math.round(r.size * (r.w / txt.w) * 100) / 100); place(); }
-    curAnnots().push(cover, txt);
-    hover = null;
+    const txt = { id: uid(), type: 'text', x: 0, y: 0, w: 0, h: 0, rot: r.rot, text: r.text,
+                  size: r.size, font: fontFor(r), bold: /bold|black|heavy|semibold|demi/i.test(r.fontLabel),
+                  color: look.fg, opacity: 1 };
+    // Keep the original size and baseline exactly: that is what makes it sit level with the
+    // text around it. Our font may render a little wider or narrower, which is far less
+    // noticeable than a change of size.
+    txt.x = r.base[0] + 0.9 * txt.size * r.perp[0];
+    txt.y = r.base[1] + 0.9 * txt.size * r.perp[1];
+    measureText(txt);
+    curAnnots().push(coverFor(r, look), txt);
+    hover = null; picked = null;
     drawOverlay();
     startTextEdit(txt);
-    toast('Editing the page text. Delete it all to remove the line. Esc when done.', 3500);
+    toast('Editing the page text. Empty the box to delete the line. Esc when done.', 3500);
     return true;
   };
 
@@ -134,7 +200,7 @@
   $('#btnFind').onclick = openFind;
   document.addEventListener('keydown', e => { if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'f') { e.preventDefault(); openFind(); } });
 
-  /* ---------- overlay layer: hover box and match highlights (called from drawOverlay) ---------- */
+  /* ---------- overlay: hover box, picked box, search matches ---------- */
   window.drawPdfTextLayer = (ctx, s) => {
     const dpr = window.devicePixelRatio || 1;
     if (find.docRef && find.docRef !== state.pdfjs) { find.matches = []; find.cur = -1; find.docRef = state.pdfjs; if (find.open) updateCount(); }
@@ -149,13 +215,14 @@
         ctx.restore();
       });
     }
-    if (hover && hoverPage === state.cur && state.tool === 'select' && !editing) {
-      const r = hover;
+    const mark = (r, fill, stroke, dash) => {
       ctx.save(); ctx.translate(r.x * s, r.y * s); ctx.rotate(r.rot * Math.PI / 180);
-      ctx.fillStyle = 'rgba(59,130,246,.10)'; ctx.fillRect(-2 * s, -2 * s, (r.w + 4) * s, (r.h + 4) * s);
-      ctx.strokeStyle = 'rgba(59,130,246,.9)'; ctx.lineWidth = dpr; ctx.setLineDash([3 * dpr, 3 * dpr]);
+      ctx.fillStyle = fill; ctx.fillRect(-2 * s, -2 * s, (r.w + 4) * s, (r.h + 4) * s);
+      ctx.strokeStyle = stroke; ctx.lineWidth = (dash ? 1 : 1.6) * dpr; if (dash) ctx.setLineDash([3 * dpr, 3 * dpr]);
       ctx.strokeRect(-2 * s, -2 * s, (r.w + 4) * s, (r.h + 4) * s);
       ctx.restore();
-    }
+    };
+    if (picked && pickedPage === state.cur && !editing) mark(picked, 'rgba(59,130,246,.20)', 'rgba(59,130,246,1)', false);
+    else if (hover && hoverPage === state.cur && state.tool === 'select' && !editing) mark(hover, 'rgba(59,130,246,.10)', 'rgba(59,130,246,.9)', true);
   };
 })();
