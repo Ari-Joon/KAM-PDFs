@@ -135,6 +135,10 @@ input[type=range]{accent-color:var(--accent)}
 .scan-code{font-size:18px;letter-spacing:3px;color:var(--accent)}
 #scanStatus.ok{color:#22c55e}
 #scanStatus.err{color:#ef4444}
+#findBar{position:absolute;right:16px;display:flex;align-items:center;gap:6px;padding:6px 8px;background:var(--panel);border:1px solid var(--border);border-radius:8px;box-shadow:0 4px 16px rgba(0,0,0,.35);z-index:5}
+#findBar input{width:220px}
+#findBar button{padding:3px 8px}
+#findCount{min-width:70px;text-align:center;white-space:nowrap}
 .spell-list{max-height:52vh;overflow:auto;margin:4px 0 10px}
 .spell-item{display:flex;align-items:center;gap:10px;padding:9px 4px;border-bottom:1px solid var(--border);flex-wrap:wrap}
 .spell-item:last-child{border-bottom:none}
@@ -164,6 +168,7 @@ kbd{background:var(--kbd);border:1px solid var(--border);border-radius:4px;paddi
   <div class="group">
     <button id="btnUndo" title="Undo (Ctrl+Z)">↶ Undo</button>
     <button id="btnRedo" title="Redo (Ctrl+Y)">↷ Redo</button>
+    <button id="btnFind" title="Find in document (Ctrl+F)">🔍 Find</button>
   </div>
   <div class="group">
     <button id="btnSave" class="primary" title="Download the edited PDF (Ctrl+S)">⬇ Save PDF</button>
@@ -284,6 +289,7 @@ kbd{background:var(--kbd);border:1px solid var(--border);border-radius:4px;paddi
       <div class="muted" style="line-height:1.6">
         <b>Text:</b> click to place free text, or drag out a box first and the text wraps to that width. Drag the corner square to change the width. Double-click to edit. Paste an image from the clipboard with Ctrl+V.<br><br>
         Annotations are drawn on top of the page when you save. Whiteout only covers content visually; the underlying text stays in the file.<br><br>
+        <b>Edit existing text:</b> with the Select tool, hover over any text already in the PDF and it lights up. Double-click it to edit that line in place: the original is covered with the page's own background colour and replaced by a text box you can type in, matched for size and colour. Delete everything in the box to remove the line. <b>Find</b> (Ctrl+F) searches the whole document.<br><br>
         <b>Spelling:</b> misspelled words in text you add get a red dotted underline, and your browser underlines them while you type (right-click for its suggestions). "Check spelling" in the Document tab lists every one with corrections, and you can add words to your own dictionary.<br><br>
         <b>Scan:</b> click 📷 Scan, point your phone at the QR code, photograph pages on the phone and tap Send. Pages arrive here straightened and cleaned up. No phone? Use the webcam or clean up existing photos.<br><br>
         Password-protected PDFs can't be opened. Print them to a new PDF first.
@@ -309,6 +315,8 @@ kbd{background:var(--kbd);border:1px solid var(--border);border-radius:4px;paddi
 <script src="scan-ui.js"></script>
 <script src="spell.js"></script>
 <script src="spell-ui.js"></script>
+<script src="pdftext.js"></script>
+<script src="pdftext-ui.js"></script>
 <script src="scan-desktop.js"></script>
 <script>
 if ("serviceWorker" in navigator && location.protocol.startsWith("http")) {

@@ -60,6 +60,10 @@ Unzip and open `index.html` in Chrome, Edge, Firefox, or Safari. Everything work
 - Turn images (JPG, PNG, and so on) into PDF pages
 - Extract a page range into a separate PDF (split)
 
+**Edit the text that's already there**
+- Hover over any line of existing text and double-click to edit it in place, matched for position, size, font and colour
+- Delete a line by emptying it; Find (Ctrl+F) searches the whole document and steps through matches
+
 **Annotate**
 - Text in Helvetica, Times, or Courier, bold, any size and colour
 - Freehand pen, lines, arrows, rectangles, ellipses
@@ -91,6 +95,14 @@ Unzip and open `index.html` in Chrome, Edge, Firefox, or Safari. Everything work
 **Welcome screen.** Open a file, start a blank one, or scan a document.
 
 ![Welcome screen](screenshots/welcome.png)
+
+**Editing existing text.** Double-click a line already in the PDF and it becomes editable in place. Here the red total has been picked up with its own colour, size and typeface.
+
+![Editing text that was already in the PDF](screenshots/edit-text.png)
+
+**Find.** Ctrl+F searches every page; Enter steps through the matches.
+
+![Find in document](screenshots/find.png)
 
 **Pen and colours.** Freehand drawing with any colour and width.
 
@@ -135,6 +147,8 @@ Phone scanner page: https://ari-joon.github.io/KAM-PDFs/scan.html
 | `Ctrl+Z` / `Ctrl+Y` | Undo / redo |
 | `Ctrl+C` `Ctrl+V` `Ctrl+D` | Copy, paste, duplicate the selected annotation |
 | Arrow keys | Nudge the selected annotation (Shift for 10x) |
+| `Ctrl+F` | Find in document (Enter / Shift+Enter to step) |
+| Double-click | Edit a line of existing text, or a text box you added |
 | `Ctrl+S` / `Ctrl+P` | Save PDF / print |
 | `←` `→` | Previous / next page (nothing selected) |
 | `Ctrl` + mouse wheel | Zoom |
@@ -151,6 +165,8 @@ core.js                 loading, rendering, navigation, undo, theme
 annot.js                annotation tools and editing
 ops.js                  page operations, forms, metadata, export
 lib/                    pdf.js, pdf-lib, peerjs, qrcode (all bundled)
+pdftext.js              index of the PDF's own text: positions, lines, search
+pdftext-ui.js           double-click-to-edit and the Find bar
 spell.js                dictionary loading, checking and suggestions
 spell-ui.js             underlines and the spelling review dialog
 dict/en.txt             bundled English word list (loaded on first use)
@@ -166,7 +182,7 @@ Install KAM PDFs.bat    double-click installer (Windows)
 ## Limits
 
 - Password-protected PDFs can't be opened. Open them in another viewer and "Print to PDF" first.
-- Existing text can't be edited in place. Cover it with whiteout and type over it.
+- Editing existing text works line by line and keeps the same position. It uses one of the three built-in fonts, so a very unusual typeface will look slightly different after editing.
 - Whiteout is visual only. The original text is still inside the file, so don't rely on it for redacting sensitive information.
 
 ## Licence

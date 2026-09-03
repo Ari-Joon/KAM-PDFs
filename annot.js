@@ -133,6 +133,7 @@ function drawOverlay() {
   ctx.clearRect(0, 0, overlay.width, overlay.height);
   if (!state.pageIds.length) return;
   const s = state.zoom * (window.devicePixelRatio || 1);
+  if (typeof drawPdfTextLayer === 'function') drawPdfTextLayer(ctx, s);
   drawAnnots(ctx, curPageId(), s, state.selected);
   if (drag && drag.mode === 'textbox') {
     const dpr = window.devicePixelRatio || 1, [sx, sy] = drag.start, [cx, cy] = drag.cur;
@@ -284,7 +285,12 @@ overlay.addEventListener('pointerdown', e => {
 });
 overlay.addEventListener('pointermove', e => {
   if (!drag) {
-    if (state.tool === 'select') { const [x, y] = evtPt(e); overlay.style.cursor = hitHandle(state.selected, x, y) ? 'nwse-resize' : hitTest(x, y) ? 'move' : 'default'; }
+    if (state.tool === 'select') {
+      const [x, y] = evtPt(e); const onHandle = hitHandle(state.selected, x, y), hit = !onHandle && hitTest(x, y);
+      let cur = onHandle ? 'nwse-resize' : hit ? 'move' : 'default';
+      if (typeof pdfTextHover === 'function' && pdfTextHover(x, y, !onHandle && !hit)) cur = 'text';
+      overlay.style.cursor = cur;
+    }
     return;
   }
   const [x, y] = evtPt(e); const a = drag.a;
@@ -323,7 +329,9 @@ overlay.addEventListener('pointercancel', endDrag);
 overlay.addEventListener('dblclick', e => {
   if (state.tool !== 'select') return;
   const [x, y] = evtPt(e); const a = hitTest(x, y);
-  if (a && a.type === 'text') startTextEdit(a);
+  if (a && a.type === 'text') { startTextEdit(a); return; }
+  // nothing of ours under the cursor: try the text that is already in the PDF
+  if (!a && typeof pdfTextEditAt === 'function') pdfTextEditAt(x, y);
 });
 
 /* ---------- inline text editing ---------- */
