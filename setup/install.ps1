@@ -67,7 +67,9 @@ foreach ($l in $links) {
   if ($app) {
     $s.TargetPath = $app.Proxy
     $s.Arguments  = "--profile-directory=$($app.Profile) --app-id=$($app.AppId)"
-    $s.IconLocation = "$($app.Icon),0"
+    # Prefer our own icon file: the browser caches its generated copy and is slow to
+    # refresh it after an artwork change, so ours is the one that is always current.
+    if (Test-Path $icon) { $s.IconLocation = "$icon,0" } else { $s.IconLocation = "$($app.Icon),0" }
     $s.WorkingDirectory = (Split-Path -Parent $app.Proxy)
   } elseif ($browser) {
     $s.TargetPath = $browser
