@@ -58,19 +58,24 @@ const KamDraft = (() => {
     return new Date(ts).toLocaleString();
   };
 
+  // Returns whether a copy was actually written, so callers that are about to reload the page
+  // (updating, for one) can tell the difference between "kept" and "quietly did nothing".
   async function saveNow() {
-    if (!on || saving || !state.doc || !state.bytes) return;
-    if (state.bytes.byteLength > MAXB) { setState('Document too large to keep a working copy'); return; }
+    if (!on || saving || !state.doc || !state.bytes) return false;
+    if (state.bytes.byteLength > MAXB) { setState('Document too large to keep a working copy'); return false; }
     saving = true;
+    let okd = false;
     try {
       const bytes = state.bytes.slice().buffer;
       const annots = state.pageIds.map(id => state.annots[id] || []);
       const ocr = state.pageIds.map(id => (state.ocr && state.ocr[id]) || []);
-      const okd = await KamDraft.put({ fileName: state.fileName, bytes, annots, ocr, cur: state.cur, savedAt: Date.now(), v: 1 });
+      okd = await KamDraft.put({ fileName: state.fileName, bytes, annots, ocr, cur: state.cur, savedAt: Date.now(), v: 1 });
       if (okd) { lastSaved = Date.now(); setState('Working copy kept ' + when(lastSaved)); }
     } catch (e) { console.warn('could not keep a working copy', e); }
     saving = false;
+    return !!okd;
   }
+  window.saveDraftNow = saveNow;
   const MAXB = 80 * 1024 * 1024;
 
   window.noteChange = () => {

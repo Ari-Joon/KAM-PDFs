@@ -710,6 +710,114 @@ test('the scanner finds the page in a photo', async b => {
   ok(Math.max(...d.err) < 25, `corners off by ${JSON.stringify(d.err)} pixels`);
 });
 
+// Whether the bar is actually on screen, not merely whether the flag was set: an earlier bug in
+// this project survived because a test graded the thing that set the value.
+const barShows = `(() => { const u = document.getElementById('updateBar');
+  return u.offsetHeight > 0 && u.offsetWidth > 0 && getComputedStyle(u).display !== 'none'; })()`;
+
+test('a newer version is noticed and offered in the bar', async b => {
+  await b.reload();
+
+  // 1.10.0 is older than 1.9.0 if you compare the strings, which is the usual way to get this wrong
+  eq(await b.evaluate(`[versionIsNewer('1.10.0','1.9.0'), versionIsNewer('1.9.0','1.10.0'),
+    versionIsNewer('1.12.0','1.12.0'), versionIsNewer('2.0.0','1.99.9'), versionIsNewer('1.12.1','1.12')]`),
+    [true, false, false, true, true], 'versions compare number by number');
+
+  const forget = `(() => { try { localStorage.removeItem('kam-skip-version'); localStorage.removeItem('kam-update-checked'); } catch (e) {} return 1; })()`;
+  await b.evaluate(forget);
+
+  // against the real version.json, which describes this very build, nothing is offered
+  await b.evaluate(`checkForUpdate(true)`);
+  eq(await b.evaluate(barShows), false, 'no bar when the site matches this build');
+
+  // now let the site claim a newer one
+  const claims = v => `(() => { window.fetch = async u => (String(u).includes('version.json')
+      ? { ok: true, json: async () => ({ version: '${v}', notes: 'faster everything', url: 'https://example.invalid/rel' }) }
+      : { ok: false, status: 404 });
+    return 1; })()`;
+  await b.evaluate(claims('9.9.9'));
+  await b.evaluate(forget);
+  await b.evaluate(`checkForUpdate(true)`);
+  eq(await b.evaluate(barShows), true, 'the bar appears');
+  const msg = await b.evaluate(`document.getElementById('updateMsg').textContent`);
+  ok(msg.includes('9.9.9'), `the bar names the version, said: ${msg}`);
+  ok(msg.includes('faster everything'), 'the bar says what changed');
+  eq(await b.evaluate(`document.getElementById('updateNotes').href`), 'https://example.invalid/rel', 'the link points at that release');
+
+  // it goes where it was asked to go: under the tools, above the page. offsetTop is used
+  // rather than a bounding box because the bar slides in, and a box read mid-animation lies.
+  const geo = JSON.parse(await b.evaluate(`(() => {
+    const t = document.getElementById('toolbar'), u = document.getElementById('updateBar'), v = document.getElementById('viewport');
+    const bg = getComputedStyle(u).backgroundImage;
+    return JSON.stringify({
+      underTools: u.offsetTop >= t.offsetTop + t.offsetHeight,
+      overPage: u.offsetTop + u.offsetHeight <= v.offsetTop,
+      wide: u.offsetWidth > 300,
+      green: bg.includes('rgb(0, 96, 57)'),
+    });
+  })()`));
+  ok(geo.underTools, 'the bar sits below the tool row');
+  ok(geo.overPage, 'and above the page itself');
+  ok(geo.wide, 'and spans the window');
+  ok(geo.green, 'and it is the racing green');
+
+  // "Not now" hides it and is remembered, but only for that version
+  await b.evaluate(`document.getElementById('btnUpdateLater').click()`);
+  eq(await b.evaluate(barShows), false, 'Not now hides the bar');
+  await b.evaluate(`localStorage.removeItem('kam-update-checked'); 1`);
+  await b.evaluate(`checkForUpdate(true)`);
+  eq(await b.evaluate(barShows), false, 'the same version does not nag again');
+  await b.evaluate(claims('9.9.10'));
+  await b.evaluate(`localStorage.removeItem('kam-update-checked'); 1`);
+  await b.evaluate(`checkForUpdate(true)`);
+  eq(await b.evaluate(barShows), true, 'but a newer one is still offered');
+
+  // GitHub answers if the site's own file cannot be reached
+  await b.evaluate(`(() => { window.fetch = async u => (String(u).includes('api.github.com')
+      ? { ok: true, json: async () => ({ tag_name: 'v8.1.0', name: 'KAM PDFs v8.1.0 - a nice change', html_url: 'https://example.invalid/gh' }) }
+      : { ok: false, status: 500 });
+    return 1; })()`);
+  const gh = JSON.parse(await b.evaluate(`latestRelease().then(r => JSON.stringify(r))`));
+  eq(gh.version, '8.1.0', 'the tag is read without its v');
+  eq(gh.notes, 'a nice change', 'the release title is trimmed to what changed');
+});
+
+test('updating clears the offline copy and reloads', async b => {
+  await b.reload();
+  await b.evaluate(`(() => { window.fetch = async u => (String(u).includes('version.json')
+      ? { ok: true, json: async () => ({ version: '9.9.9', notes: 'x', url: 'https://example.invalid/rel' }) }
+      : { ok: false, status: 404 });
+    try { localStorage.removeItem('kam-skip-version'); localStorage.removeItem('kam-update-checked'); } catch (e) {}
+    return 1; })()`);
+  await b.evaluate(`checkForUpdate(true)`);
+  eq(await b.evaluate(barShows), true, 'the bar is showing');
+
+  // leave a stale cache behind, so we can tell whether updating really clears it
+  await b.evaluate(`caches.open('kam-pdfs-vOLD').then(c => c.put('/stale', new Response('old')))`);
+  ok(await b.evaluate(`caches.keys().then(k => k.includes('kam-pdfs-vOLD'))`), 'the stale cache was planted');
+
+  await b.evaluate(`(() => { document.getElementById('btnUpdateNow').click(); return 1; })()`);
+  await b.waitFor(`performance.getEntriesByType('navigation')[0].type === 'reload' && typeof state !== 'undefined'`, 20000);
+  eq(await b.evaluate(`caches.keys().then(k => k.includes('kam-pdfs-vOLD'))`), false, 'the old offline copy is gone');
+  eq(await b.evaluate(barShows), false, 'and the bar is not left over after the reload');
+});
+
+test('the released version number is stated in one place only', async () => {
+  const core = fs.readFileSync(path.join(ROOT, 'core.js'), 'utf8');
+  const app = (core.match(/KAM_VERSION\s*=\s*'([^']+)'/) || [])[1];
+  ok(app, 'core.js does not state a version');
+
+  // version.json is what an installed copy asks in order to learn that a newer one exists.
+  // Forget to bump it and the release is invisible to everyone already running the app.
+  const site = JSON.parse(fs.readFileSync(path.join(ROOT, 'version.json'), 'utf8'));
+  eq(site.version, app, 'version.json does not match the version in core.js');
+  ok(/^https:\/\//.test(site.url || ''), 'version.json needs a download url');
+
+  // and the service worker cache has to change, or browsers keep serving the old files
+  const sw = fs.readFileSync(path.join(ROOT, 'sw.js'), 'utf8');
+  eq((sw.match(/VERSION\s*=\s*'kam-pdfs-v([^']+)'/) || [])[1], app, 'sw.js cache name does not match the version');
+});
+
 /* ---------- optional second-engine check ---------- */
 function pdfiumInk(buf) {
   const tmp = path.join(os.tmpdir(), 'kam-pdfium-check.pdf');

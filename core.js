@@ -5,7 +5,7 @@ pdfjsLib.GlobalWorkerOptions.workerSrc = 'lib/pdf.worker.min.js';
 
 /* Bumped with each release, and shown in the Help tab. Because it lives in the code that
    is actually running, it tells you which version you have rather than which is newest. */
-const KAM_VERSION = '1.12.0';
+const KAM_VERSION = '1.13.0';
 
 const $ = s => document.querySelector(s);
 const $$ = s => [...document.querySelectorAll(s)];
@@ -266,34 +266,140 @@ window.addEventListener('drop', e => {
   e.preventDefault(); handleDroppedFiles([...e.dataTransfer.files]);
 });
 
-/* ---------- version, and forcing an update ---------- */
+/* ---------- version, and updating in place ----------
+   Two questions, kept separate: is there a newer release (version.json on the site, or
+   GitHub's own release list if that is unreachable), and can this copy replace itself
+   (only if it is served over http and has a service worker; a copy unzipped into a folder
+   has to be replaced by hand). */
+const KAM_REPO = 'Ari-Joon/KAM-PDFs';
+const KAM_RELEASES = 'https://github.com/' + KAM_REPO + '/releases/latest';
+const CHECK_EVERY = 6 * 60 * 60 * 1000;
+let pendingUpdate = null;
+
 function showVersion() {
   const el = $('#appVersion'); if (el) el.textContent = 'v' + KAM_VERSION;
 }
-async function checkForUpdate() {
-  const btn = $('#btnUpdate'); if (btn) { btn.disabled = true; btn.textContent = 'Checking…'; }
-  try {
-    if (!('serviceWorker' in navigator) || !location.protocol.startsWith('http')) {
-      toast('This copy runs from a file, so it updates when you replace the folder.', 5000);
-    } else {
-      const reg = await navigator.serviceWorker.getRegistration();
-      if (!reg) { toast('No update service registered. Reload the page.', 4000); }
-      else {
-        await reg.update();
-        if (reg.installing || reg.waiting) {
-          toast('A newer version is downloading. Reloading…', 4000);
-          if (reg.waiting) reg.waiting.postMessage({ type: 'skipWaiting' });
-          setTimeout(() => location.reload(), 1200);
-        } else {
-          toast('You are on the latest version (v' + KAM_VERSION + ').', 4000);
-        }
-      }
-    }
-  } catch (e) { console.error(e); toast('Could not check for updates: ' + e.message, 5000); }
-  if (btn) { btn.disabled = false; btn.textContent = 'Check for updates'; }
+// 1.10.0 is older than 1.9.0 if you compare as text, so compare number by number.
+function versionIsNewer(a, b) {
+  const A = String(a).split('.'), B = String(b).split('.');
+  for (let i = 0; i < Math.max(A.length, B.length); i++) {
+    const x = parseInt(A[i], 10) || 0, y = parseInt(B[i], 10) || 0;
+    if (x !== y) return x > y;
+  }
+  return false;
 }
+const canReplaceItself = () => 'serviceWorker' in navigator && location.protocol.startsWith('http');
+
+async function latestRelease() {
+  // The site's own file first: same origin, no rate limit, and it still answers if GitHub's
+  // API is blocked on this network.
+  if (location.protocol.startsWith('http')) {
+    try {
+      const r = await fetch('version.json?t=' + Date.now(), { cache: 'no-store' });
+      if (r.ok) {
+        const j = await r.json();
+        if (j && j.version) return { version: String(j.version), notes: j.notes || '', url: j.url || KAM_RELEASES };
+      }
+    } catch (e) { /* fall through to GitHub */ }
+  }
+  const r = await fetch('https://api.github.com/repos/' + KAM_REPO + '/releases/latest',
+    { cache: 'no-store', headers: { Accept: 'application/vnd.github+json' } });
+  if (!r.ok) throw new Error('GitHub replied ' + r.status);
+  const j = await r.json();
+  const v = String(j.tag_name || '').replace(/^v/i, '');
+  if (!v) throw new Error('no version in the reply');
+  return { version: v, notes: String(j.name || '').replace(/^KAM PDFs v[\d.]+\s*-\s*/i, ''), url: j.html_url || KAM_RELEASES };
+}
+
+function showUpdateBar(info) {
+  pendingUpdate = info;
+  const bar = $('#updateBar'); if (!bar) return;
+  $('#updateMsg').textContent = 'KAM PDFs ' + info.version + ' is available'
+    + (info.notes ? ' — ' + info.notes : '') + '. It is free, as always.';
+  $('#updateNotes').href = info.url;
+  $('#btnUpdateNow').textContent = canReplaceItself() ? 'Update now' : 'Get the update';
+  $('#btnUpdateNow').disabled = false;
+  bar.hidden = false;
+}
+function hideUpdateBar() { const b = $('#updateBar'); if (b) b.hidden = true; }
+
+async function checkForUpdate(auto) {
+  const btn = $('#btnUpdate');
+  if (!auto && btn) { btn.disabled = true; btn.textContent = 'Checking…'; }
+  try {
+    if (!navigator.onLine) { if (!auto) toast('You are offline, so there is nothing to check against yet.', 4000); return; }
+    const info = await latestRelease();
+    try { localStorage.setItem('kam-update-checked', String(Date.now())); } catch (e) { }
+    if (versionIsNewer(info.version, KAM_VERSION)) {
+      let skipped = null; try { skipped = localStorage.getItem('kam-skip-version'); } catch (e) { }
+      if (auto && skipped === info.version) return;   // they said not now, and nothing newer has landed since
+      showUpdateBar(info);
+    } else {
+      hideUpdateBar();
+      if (!auto) toast('You are on the latest version (v' + KAM_VERSION + ').', 4000);
+    }
+  } catch (e) {
+    console.warn('update check failed', e);
+    if (!auto) toast('Could not check for updates: ' + e.message, 5000);
+  } finally {
+    if (!auto && btn) { btn.disabled = false; btn.textContent = 'Check for updates'; }
+  }
+}
+
+async function applyUpdate() {
+  const b = $('#btnUpdateNow');
+  const url = (pendingUpdate && pendingUpdate.url) || KAM_RELEASES;
+  if (!canReplaceItself()) {
+    // Running from a folder on disk: it cannot rewrite its own files, so send them to the download.
+    window.open(url, '_blank', 'noopener');
+    toast('Download the new zip and unzip it over your KAM PDFs folder. Your settings and working copy are kept.', 9000);
+    return;
+  }
+  if (!navigator.onLine) { toast('You are offline. Reconnect and try again.', 4000); return; }
+  // Reloading throws away anything unsaved, so keep a working copy first and say so if we cannot.
+  if (state.doc && state.dirty) {
+    let kept = false;
+    if (typeof saveDraftNow === 'function') { try { kept = await saveDraftNow(); } catch (e) { } }
+    if (!kept && !confirm('Updating reloads KAM PDFs, and this document has changes that are not saved.\n\nSave the PDF first, or press OK to update anyway.')) return;
+  }
+  if (b) { b.disabled = true; b.textContent = 'Updating…'; }
+  try {
+    const reg = await navigator.serviceWorker.getRegistration();
+    if (reg) {
+      await reg.update();
+      if (reg.waiting) reg.waiting.postMessage({ type: 'skipWaiting' });
+    }
+    // Clear the offline copy, or the reload would just serve the old files back.
+    if (window.caches) { const keys = await caches.keys(); await Promise.all(keys.map(k => caches.delete(k))); }
+    location.reload();
+  } catch (e) {
+    console.error(e);
+    toast('Could not update: ' + e.message + '. You can download it instead.', 6000);
+    if (b) { b.disabled = false; b.textContent = 'Update now'; }
+  }
+}
+
+function laterOnUpdate() {
+  if (pendingUpdate) { try { localStorage.setItem('kam-skip-version', pendingUpdate.version); } catch (e) { } }
+  hideUpdateBar();
+  toast('Hidden until the next version. "Check for updates" in the Document tab brings it back.', 5000);
+}
+
+function maybeAutoCheck() {
+  if (!navigator.onLine) return;
+  let last = 0; try { last = parseInt(localStorage.getItem('kam-update-checked'), 10) || 0; } catch (e) { }
+  if (Date.now() - last < CHECK_EVERY) return;
+  checkForUpdate(true);
+}
+
 showVersion();
-$('#btnUpdate').onclick = checkForUpdate;
+$('#btnUpdate').onclick = () => checkForUpdate(false);
+$('#btnUpdateNow').onclick = applyUpdate;
+$('#btnUpdateLater').onclick = laterOnUpdate;
+// Let the app finish opening before going near the network.
+setTimeout(maybeAutoCheck, 4000);
+window.addEventListener('online', () => setTimeout(maybeAutoCheck, 2000));
+document.addEventListener('visibilitychange', () => { if (!document.hidden) maybeAutoCheck(); });
 
 /* ---------- light / dark theme ---------- */
 function applyTheme(t) {

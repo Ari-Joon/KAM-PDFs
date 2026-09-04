@@ -78,6 +78,24 @@ input[type=range]{accent-color:var(--accent)}
 
 #viewer{flex:1;display:flex;flex-direction:column;min-width:0;min-height:0;position:relative;overflow:hidden}
 #toolbar{display:flex;flex-direction:column;align-items:stretch;gap:6px;padding:6px 10px;background:var(--panel);border-bottom:1px solid var(--border);flex:none}
+/* The update bar. British racing green, so it reads as an announcement rather than a warning. */
+#updateBar{display:flex;align-items:center;gap:10px;flex:none;padding:8px 14px;color:#fff;
+  background:linear-gradient(90deg,#00312a 0%,#00553c 55%,#006039 100%);
+  border-bottom:1px solid rgba(0,0,0,.45);box-shadow:inset 0 1px 0 rgba(255,255,255,.14),0 2px 10px rgba(0,0,0,.28);
+  font-size:13px;animation:updateIn .35s ease}
+@keyframes updateIn{from{opacity:0;transform:translateY(-8px)}to{opacity:1;transform:none}}
+#updateDot{width:8px;height:8px;border-radius:50%;background:var(--accent);flex:none;
+  box-shadow:0 0 0 3px rgba(245,180,0,.25);animation:updatePulse 2.2s ease-in-out infinite}
+@keyframes updatePulse{0%,100%{box-shadow:0 0 0 3px rgba(245,180,0,.25)}50%{box-shadow:0 0 0 6px rgba(245,180,0,.06)}}
+#updateMsg{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#updateBar a{color:#ffe08a;text-decoration:underline;text-underline-offset:2px;white-space:nowrap}
+#updateBar a:hover{color:#fff}
+#updateBar button{flex:none;padding:4px 12px;border-radius:6px;font-size:12px;cursor:pointer}
+#btnUpdateNow{background:var(--accent);border:1px solid var(--accent);color:#111;font-weight:600}
+#btnUpdateNow:hover:not(:disabled){background:var(--accent-hover)}
+#btnUpdateLater{background:transparent;border:1px solid rgba(255,255,255,.35);color:#e8f3ee}
+#btnUpdateLater:hover{background:rgba(255,255,255,.12)}
+@media (max-width:760px){#updateBar a{display:none}}
 #toolbar .sep{display:none}
 #tools{display:flex;flex-wrap:wrap;gap:6px}
 #tools button{padding:5px 9px}
@@ -235,6 +253,13 @@ kbd{background:var(--kbd);border:1px solid var(--border);border-radius:4px;paddi
         <span id="hint" class="muted"></span>
       </div>
     </div>
+    <div id="updateBar" hidden>
+      <span id="updateDot"></span>
+      <span id="updateMsg">A new version is available.</span>
+      <a id="updateNotes" href="https://github.com/Ari-Joon/KAM-PDFs/releases/latest" target="_blank" rel="noopener">What's new</a>
+      <button id="btnUpdateNow">Update now</button>
+      <button id="btnUpdateLater" title="Hide this until the next version">Not now</button>
+    </div>
     <div id="viewport">
       <div id="pageWrap">
         <canvas id="pageCanvas"></canvas>
@@ -327,6 +352,7 @@ kbd{background:var(--kbd);border:1px solid var(--border);border-radius:4px;paddi
         <b>Scanned pages:</b> "Read this page" under Scanned pages finds the words in a scan and adds them to the saved PDF as an invisible layer, so it becomes searchable. It runs on your computer.<br><br>
         <b>Edit existing text:</b> with the Select tool, hover over any text already in the PDF and it lights up. Double-click it to edit that line in place: the original is covered with the page's own background colour and replaced by a text box you can type in, matched for size and colour. Delete everything in the box to remove the line. <b>Find</b> (Ctrl+F) searches the whole document.<br><br>
         <b>Spelling:</b> misspelled words in text you add get a red dotted underline, and your browser underlines them while you type (right-click for its suggestions). "Check spelling" in the Document tab lists every one with corrections, and you can add words to your own dictionary.<br><br>
+        <b>Updates:</b> if you are online, KAM PDFs checks now and then whether a newer version exists and says so in a green bar under the tools. <b>Update now</b> does it right there: it fetches the new version and restarts, keeping a working copy of whatever is open first. A copy you unzipped into a folder cannot replace its own files, so the button takes you to the download instead. <b>Not now</b> hides the bar until there is something newer still. Nothing about you or your file is sent; it only asks what the latest version number is.<br><br>
         <b>Signatures:</b> a signature you draw is kept on this computer, so next time you can pick it from the gallery in the Sign box instead of drawing it again.<br><br>
         <b>Your work is kept as you go:</b> a working copy of the document and everything you have added is stored in this browser on this computer. If the window closes or the computer restarts, reopen KAM PDFs and it offers your last session back. Nothing is uploaded. Turn it off or clear it under Working copy in the Document tab.<br><br>
         <b>Scan:</b> click 📷 Scan, point your phone at the QR code, photograph pages on the phone and tap Send. Pages arrive here straightened and cleaned up. No phone? Use the webcam or clean up existing photos.<br><br>

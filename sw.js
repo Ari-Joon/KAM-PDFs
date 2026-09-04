@@ -1,5 +1,5 @@
 /* KAM PDFs service worker: caches the whole app so it works offline and can be installed as an app. */
-const VERSION = 'kam-pdfs-v1.12.0';
+const VERSION = 'kam-pdfs-v1.13.0';
 // dict/en.txt and lib/ocr/* are deliberately not precached: they are large and only
 // fetched when spell checking or OCR is first used, after which the fetch handler below
 // keeps them for offline use.
@@ -19,9 +19,11 @@ self.addEventListener('activate', e => {
 const save = (req, res) => { if (res.ok) { const copy = res.clone(); caches.open(VERSION).then(c => c.put(req, copy)); } return res; };
 self.addEventListener('fetch', e => {
   if (e.request.method !== 'GET' || !e.request.url.startsWith(self.location.origin)) return;
-  // Branding files change independently of the app code. Always try the network for them,
-  // so an installed app can never pick up stale artwork, and fall back to cache offline.
-  if (/\/icons\/|manifest\.json$|logo\.(svg|ico)$/.test(new URL(e.request.url).pathname)) {
+  // Branding files change independently of the app code, and version.json is how the app
+  // learns that a newer release exists. Always try the network for these, so an installed app
+  // can never pick up stale artwork or be told it is current when it is not, and fall back to
+  // the cache when offline.
+  if (/\/icons\/|manifest\.json$|version\.json$|logo\.(svg|ico)$/.test(new URL(e.request.url).pathname)) {
     e.respondWith(fetch(e.request).then(res => save(e.request, res))
       .catch(() => caches.match(e.request, { ignoreSearch: true })));
     return;

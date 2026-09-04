@@ -106,6 +106,12 @@ Unzip and open `index.html` in Chrome, Edge, Firefox, or Safari. Everything work
 - Light and dark mode (the ☀ / 🌙 button, remembered between sessions)
 - A working copy is kept on your computer as you go, so a crash or a closed window does not cost you the afternoon. Reopen the app and it offers your last session back. Nothing is uploaded, and Forget removes it
 
+**Staying up to date**
+- If you're online, KAM PDFs checks whether a newer version exists and tells you in a green bar under the tools. It checks at most once every six hours, and never sends anything about you or your file
+- **Update now** in that bar does it there and then: the app fetches the new version and restarts itself. Anything open is kept in the working copy first, so you don't lose it
+- A copy you unzipped into a folder can't rewrite its own files, so the button takes you to the download instead
+- **Not now** hides the bar until there is a version newer still. "Check for updates" in the Document tab brings it back whenever you want
+
 ## Screenshots
 
 **Welcome screen.** Open a file, start a blank one, or scan a document.
@@ -194,6 +200,8 @@ ocr.js                  reading text off a scan (Tesseract, bundled)
 ocr-ui.js               the OCR buttons and the invisible text layer
 layers.js               the Layers panel
 autosave.js             the working copy kept in this browser's storage
+version.json            the version this site is serving, which is how installed copies
+                        learn that a newer one exists
 tests/run.js            the test suite: node tests/run.js
 spell.js                dictionary loading, checking and suggestions
 spell-ui.js             underlines and the spelling review dialog
@@ -221,9 +229,9 @@ Install KAM PDFs.bat    double-click installer (Windows)
 node tests/run.js
 ```
 
-Nineteen tests covering page operations, annotation fidelity, form fields, text editing,
+Twenty-two tests covering page operations, annotation fidelity, form fields, text editing,
 selection, find, spell checking, redaction, OCR, layers, the working copy, undo and the
-scanner. Needs Node 18+ and
+scanner, and the update check. Needs Node 18+ and
 Chrome; nothing to install. See [tests/README.md](tests/README.md) for what each one checks
 and why one of them deliberately uses a second rendering engine.
 

@@ -36,6 +36,9 @@ anything fails, so it works as a pre-commit or CI check.
 | shift constraints | rectangles and ellipses stay square; lines and arrows snap to 45 degrees |
 | undo and redo | changes step backwards and forwards |
 | scanner | page corners found in a photograph |
+| the update check | a newer version raises the green bar, "Not now" is remembered for that version only, and GitHub answers when the site's own file cannot |
+| updating | the offline copy is cleared and the app restarts, so the reload really gets the new files |
+| the version number | core.js, version.json and the service worker cache name all agree |
 
 ## Why a second engine
 
@@ -61,6 +64,11 @@ Without them that one assertion is skipped and reported as skipped, not silently
   and asserts the right text was handed to it.
 - OCR downloads nothing: it uses the recogniser bundled in `lib/ocr`. That test takes a few
   seconds longer than the rest.
+- The update tests assert that the bar is actually on screen (it has a size, and is not
+  `display:none`), not merely that the `hidden` flag was cleared. Checking the flag would be
+  grading the line of code that sets it.
+- The version test is the one that stops a release going out silently: if `version.json` is not
+  bumped alongside `core.js`, nobody already running the app is ever told the release exists.
 - The restore test waits for the marks to come back, not just for the document to open: the
   file opens first and the marks are attached a moment later, so a shorter wait passes while
   the restore is still half done.
