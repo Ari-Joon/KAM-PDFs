@@ -101,6 +101,7 @@
   }
   window.pdfTextDragStart = (x, y) => {
     const pi = state.cur;
+    if (typeof deletionAt === 'function' && deletionAt(x, y)) return false;   // nothing to select in a deleted area
     if (!KamPdfText.cached(pi)) { KamPdfText.index(pi).then(() => drawOverlay()).catch(() => { }); return false; }
     const r = KamPdfText.runAt(pi, x, y);
     if (!r || coveredRun(pi, r)) { clearSel(); return false; }

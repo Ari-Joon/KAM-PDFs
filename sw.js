@@ -1,5 +1,5 @@
 /* KAM PDFs service worker: caches the whole app so it works offline and can be installed as an app. */
-const VERSION = 'kam-pdfs-v1.11.1';
+const VERSION = 'kam-pdfs-v1.11.2';
 // dict/en.txt and lib/ocr/* are deliberately not precached: they are large and only
 // fetched when spell checking or OCR is first used, after which the fetch handler below
 // keeps them for offline use.

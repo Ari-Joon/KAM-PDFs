@@ -527,6 +527,13 @@ test('a deletion is visible on screen but not in the file', async b => {
     return ink;
   })()`);
   ok(clean < 40, `the deleted area should be clean paper in the file, found ${clean} marked pixels`);
+
+  // an ordinary click must not reach the deletion, or Delete there would put the words back
+  eq(await b.evaluate(`(() => { const a = hitTest(60, 46); return a ? a.type : 'nothing'; })()`), 'nothing',
+    'a plain click should not select a deletion');
+  eq(await b.evaluate(`!!deletionAt(60, 46)`), true, 'the deletion is still there to be found deliberately');
+  eq(await b.evaluate(`(() => { const a = hitTest(60, 46, null, true); return a ? !!a.redact : false; })()`), true,
+    'Alt+click should still reach the deletion');
 });
 
 test('layers panel lists, hides, reorders and deletes marks', async b => {

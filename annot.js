@@ -187,12 +187,25 @@ function hitHandle(a, mx, my) {
   const [lx, ly] = localPt(a, mx, my), hs = 7 / state.zoom;
   return Math.abs(lx - a.w) < hs && Math.abs(ly - a.h) < hs;
 }
-function hitTest(mx, my, wanted) {
+/* Deletions are skipped by ordinary clicks. They sit exactly where the words used to be, so
+   clicking one and pressing Delete would quietly take the deletion away and bring the text
+   back, which reads as Delete simply not working. Alt+click, or the Layers tab, still reaches
+   them when you genuinely want one gone. */
+function hitTest(mx, my, wanted, includeDeletions) {
   const list = curAnnots();
   for (let i = list.length - 1; i >= 0; i--) {
     const a = list[i];
     if (a.hidden || (wanted && a.type !== wanted)) continue;
+    if (a.redact && !includeDeletions) continue;
     if (hitAnnot(a, mx, my)) return a;
+  }
+  return null;
+}
+function deletionAt(mx, my) {
+  const list = curAnnots();
+  for (let i = list.length - 1; i >= 0; i--) {
+    const a = list[i];
+    if (!a.hidden && a.redact && hitAnnot(a, mx, my)) return a;
   }
   return null;
 }
@@ -303,8 +316,9 @@ overlay.addEventListener('pointerdown', e => {
   overlay.setPointerCapture(e.pointerId);
   if (t === 'select') {
     if (state.selected && hitHandle(state.selected, x, y)) { pushAnnotUndo(curPageId()); drag = { mode: 'resize', a: state.selected, orig: { ...state.selected } }; return; }
-    const a = hitTest(x, y);
+    const a = hitTest(x, y, null, e.altKey);
     state.selected = a; updateProps();
+    if (!a && deletionAt(x, y)) toast('This area was deleted. Alt+click it, or use the Layers tab, to bring it back.', 4500);
     if (a) {
       if (typeof pdfTextClearPick === 'function') pdfTextClearPick();
       pushAnnotUndo(curPageId());
@@ -334,8 +348,8 @@ overlay.addEventListener('pointerdown', e => {
 overlay.addEventListener('pointermove', e => {
   if (!drag) {
     if (state.tool === 'select') {
-      const [x, y] = evtPt(e); const onHandle = hitHandle(state.selected, x, y), hit = !onHandle && hitTest(x, y);
-      let cur = onHandle ? 'nwse-resize' : hit ? 'move' : 'default';
+      const [x, y] = evtPt(e); const onHandle = hitHandle(state.selected, x, y), hit = !onHandle && hitTest(x, y, null, e.altKey);
+      let cur = onHandle ? 'nwse-resize' : hit ? 'move' : deletionAt(x, y) ? 'not-allowed' : 'default';
       if (typeof pdfTextHover === 'function' && pdfTextHover(x, y, !onHandle && !hit)) cur = 'text';
       overlay.style.cursor = cur;
     }
