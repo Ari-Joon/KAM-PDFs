@@ -383,6 +383,34 @@ async function burnedDoc() {
     }
   }
 
+  /* A redacted page is rebuilt from a picture, which would otherwise throw away the text of
+     the whole page. Put back an invisible copy of every word that was not redacted, so the
+     rest of the page stays searchable and selectable while the removed words stay gone.
+     The new page is the display size with no rotation, so y simply flips. */
+  async function keepSurvivingText(page, i, pageH) {
+    let runs;
+    try { runs = (await KamPdfText.index(i)).runs; } catch (e) { return; }
+    if (!runs || !runs.length) return;
+    const boxes = (state.annots[state.pageIds[i]] || [])
+      .filter(a => a.redact && !a.hidden).map(annotBox);
+    const font = await getFont({ font: 'Helvetica', bold: false });
+    const clear = (x0, x1, y0, y1) => !boxes.some(b => x0 < b.X + 1 && x1 > b.x - 1 && y0 < b.Y + 1 && y1 > b.y - 1);
+    for (const r of runs) {
+      if (Math.abs(r.rot) > 0.5) continue;              // only straight lines, which is nearly all of them
+      for (const m of r.text.matchAll(/\S+/g)) {
+        const s = m.index, e = s + m[0].length;
+        const x0 = KamPdfText.uAt(r, s), x1 = KamPdfText.uAt(r, e);
+        if (x1 - x0 < 0.2) continue;
+        if (!clear(x0, x1, r.y, r.y + r.h)) continue;   // this word was redacted: leave it out
+        const word = sanitizeForFont(m[0], font);
+        if (!word.trim()) continue;
+        let size = Math.max(1, r.size);
+        try { const nat = font.widthOfTextAtSize(word, size); if (nat > x1 - x0 && nat > 0) size *= (x1 - x0) / nat; } catch (err) { }
+        page.drawText(word, { x: x0, y: pageH - r.base[1], size: Math.max(0.5, size), font, opacity: 0 });
+      }
+    }
+  }
+
   for (let i = 0; i < state.pageIds.length; i++) {
     if (redacted.includes(i)) continue;                 // rebuilt from a bitmap further down
     const list = (state.annots[state.pageIds[i]] || []).filter(a => !a.hidden && !(a.type === 'text' && !a.text.trim()));
@@ -433,7 +461,9 @@ async function burnedDoc() {
     const blob = await new Promise(r => canvas.toBlob(r, 'image/jpeg', 0.92));
     const img = await doc.embedJpg(await blob.arrayBuffer());
     doc.removePage(i);
-    doc.insertPage(i, [w, h]).drawImage(img, { x: 0, y: 0, width: w, height: h });
+    const page = doc.insertPage(i, [w, h]);
+    page.drawImage(img, { x: 0, y: 0, width: w, height: h });
+    await keepSurvivingText(page, i, h);
   }
   const clean = await PDFDocument.create();
   const copied = await clean.copyPages(doc, doc.getPageIndices());

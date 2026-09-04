@@ -3,6 +3,10 @@
 const { PDFDocument, rgb, degrees, StandardFonts, BlendMode, LineCapStyle } = PDFLib;
 pdfjsLib.GlobalWorkerOptions.workerSrc = 'lib/pdf.worker.min.js';
 
+/* Bumped with each release, and shown in the Help tab. Because it lives in the code that
+   is actually running, it tells you which version you have rather than which is newest. */
+const KAM_VERSION = '1.11.0';
+
 const $ = s => document.querySelector(s);
 const $$ = s => [...document.querySelectorAll(s)];
 
@@ -260,6 +264,35 @@ window.addEventListener('drop', e => {
   if (!e.dataTransfer.files.length) return;
   e.preventDefault(); handleDroppedFiles([...e.dataTransfer.files]);
 });
+
+/* ---------- version, and forcing an update ---------- */
+function showVersion() {
+  const el = $('#appVersion'); if (el) el.textContent = 'v' + KAM_VERSION;
+}
+async function checkForUpdate() {
+  const btn = $('#btnUpdate'); if (btn) { btn.disabled = true; btn.textContent = 'Checking…'; }
+  try {
+    if (!('serviceWorker' in navigator) || !location.protocol.startsWith('http')) {
+      toast('This copy runs from a file, so it updates when you replace the folder.', 5000);
+    } else {
+      const reg = await navigator.serviceWorker.getRegistration();
+      if (!reg) { toast('No update service registered. Reload the page.', 4000); }
+      else {
+        await reg.update();
+        if (reg.installing || reg.waiting) {
+          toast('A newer version is downloading. Reloading…', 4000);
+          if (reg.waiting) reg.waiting.postMessage({ type: 'skipWaiting' });
+          setTimeout(() => location.reload(), 1200);
+        } else {
+          toast('You are on the latest version (v' + KAM_VERSION + ').', 4000);
+        }
+      }
+    }
+  } catch (e) { console.error(e); toast('Could not check for updates: ' + e.message, 5000); }
+  if (btn) { btn.disabled = false; btn.textContent = 'Check for updates'; }
+}
+showVersion();
+$('#btnUpdate').onclick = checkForUpdate;
 
 /* ---------- light / dark theme ---------- */
 function applyTheme(t) {

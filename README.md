@@ -62,7 +62,7 @@ Unzip and open `index.html` in Chrome, Edge, Firefox, or Safari. Everything work
 
 **Edit the text that's already there**
 - Hover over any line of existing text and double-click to edit it in place, matched for position, size, font and colour
-- Drag across text to select it and Ctrl+C to copy; click a line and press Delete to remove it
+- Drag across text to select it and Ctrl+C to copy; click a line and press Delete and the words are removed from the file, not just hidden
 - Find (Ctrl+F) searches the whole document and steps through matches
 
 **Layers**
@@ -206,7 +206,7 @@ Install KAM PDFs.bat    double-click installer (Windows)
 - Password-protected PDFs can't be opened. Open them in another viewer and "Print to PDF" first.
 - Editing existing text works line by line and keeps the same position. It uses one of the three built-in fonts, so a very unusual typeface will look slightly different after editing.
 - Whiteout and in-place text editing **hide** text, they do not delete it: the original words can still be extracted from the file. Use **Redact** when the text must actually be gone. The test suite asserts both behaviours so neither can drift.
-- A redacted page is rebuilt as an image, so it loses its own text layer and the file gets bigger. Other pages are untouched.
+- A redacted page is rebuilt as an image, so it looks slightly softer at high zoom and the file gets bigger. Every word that was not redacted is put back as invisible text, so the page stays searchable. Other pages are untouched.
 - Covering a form field flattens the form when you save, because PDF viewers always paint fields on top of the page. Fields you don't draw over stay editable.
 
 ## Tests
@@ -215,7 +215,7 @@ Install KAM PDFs.bat    double-click installer (Windows)
 node tests/run.js
 ```
 
-Fourteen tests covering page operations, annotation fidelity, form fields, text editing,
+Fifteen tests covering page operations, annotation fidelity, form fields, text editing,
 selection, find, spell checking, redaction, OCR, undo and the scanner. Needs Node 18+ and
 Chrome; nothing to install. See [tests/README.md](tests/README.md) for what each one checks
 and why one of them deliberately uses a second rendering engine.

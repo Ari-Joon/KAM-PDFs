@@ -443,6 +443,43 @@ test('OCR makes a scanned page searchable', async b => {
   ok(/Northwind/i.test(pages[0]), `saved scan is not searchable: ${JSON.stringify(pages[0])}`);
 });
 
+test('deleting a line removes it but keeps the rest of the page', async b => {
+  await b.reload();
+  await b.evaluate(makeDoc(`
+    const p = doc.addPage([420, 300]);
+    p.drawText('DELETEME-secret line', { x: 30, y: 250, size: 14, font: f });   // display y ~50
+    p.drawText('KEEPME-first survivor', { x: 30, y: 210, size: 14, font: f });  // display y ~90
+    p.drawText('KEEPME-second survivor', { x: 30, y: 170, size: 14, font: f }); // display y ~130`));
+  await b.waitFor(settled);
+  await b.evaluate(`KamPdfText.index(0)`);
+  await b.evaluate(`setTool('select')`);
+
+  eq(await b.evaluate(`(r => r && r.text)(KamPdfText.runAt(0, 60, 46))`), 'DELETEME-secret line', 'found the line to delete');
+  await b.evaluate(`pdfTextSelect(60, 46)`);
+  eq(await b.evaluate(`pdfTextDeleteSelected()`), true, 'Delete should remove the picked line');
+
+  // it must not offer itself again: this is what made deleting feel endless
+  eq(await b.evaluate(`pdfTextSelect(60, 46)`), false, 'a deleted line should not be selectable again');
+  eq(await b.evaluate(`pdfTextDeleteSelected()`), false, 'a deleted line should not be deletable twice');
+  eq(await b.evaluate(`curAnnots().length`), 1, 'covers should not pile up on the same words');
+  eq(await b.evaluate(`pdfTextHover(60, 46, true)`), false, 'a deleted line should not light up on hover');
+
+  const b64 = await b.evaluate(exportBase64);
+  const pages = await b.evaluate(textOf(b64));
+  ok(!pages[0].includes('DELETEME'), 'the deleted words are still in the saved file');
+  ok(pages[0].includes('KEEPME-first survivor'), 'the rest of the page lost its text');
+  ok(pages[0].includes('KEEPME-second survivor'), 'the rest of the page lost its text');
+
+  // and not hiding in a compressed stream either
+  const buf = Buffer.from(b64, 'base64');
+  const zlib = require('zlib');
+  let leaked = buf.includes('DELETEME');
+  for (const m of buf.toString('latin1').matchAll(/stream\r?\n([\s\S]*?)endstream/g)) {
+    try { if (zlib.inflateSync(Buffer.from(m[1], 'latin1')).includes('DELETEME')) leaked = true; } catch (e) { }
+  }
+  ok(!leaked, 'deleted words found inside the saved file');
+});
+
 test('layers panel lists, hides, reorders and deletes marks', async b => {
   await b.reload();
   await b.evaluate(makeDoc(`doc.addPage([420, 300]).drawText('Base text', { x: 30, y: 250, size: 14, font: f });`));

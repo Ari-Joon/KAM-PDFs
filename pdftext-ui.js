@@ -103,7 +103,7 @@
     const pi = state.cur;
     if (!KamPdfText.cached(pi)) { KamPdfText.index(pi).then(() => drawOverlay()).catch(() => { }); return false; }
     const r = KamPdfText.runAt(pi, x, y);
-    if (!r) { clearSel(); return false; }
+    if (!r || coveredRun(pi, r)) { clearSel(); return false; }
     sel = { page: pi, aRun: r.idx, aChar: KamPdfText.charAt(r, x, y), bRun: r.idx, bChar: KamPdfText.charAt(r, x, y) };
     return true;
   };
@@ -152,7 +152,7 @@
     if (allow && !editing) {
       const e = KamPdfText.cached(pi);
       if (!e) KamPdfText.index(pi).then(() => drawOverlay()).catch(() => { });
-      else r = KamPdfText.runAt(pi, x, y);
+      else { r = KamPdfText.runAt(pi, x, y); if (r && coveredRun(pi, r)) r = null; }
     }
     if (r !== hover || hoverPage !== pi) {
       hover = r; hoverPage = pi; drawOverlay();
@@ -167,7 +167,8 @@
     const pi = state.cur;
     const e = KamPdfText.cached(pi);
     if (!e) { KamPdfText.index(pi).then(() => drawOverlay()).catch(() => { }); clearPick(); return false; }
-    const r = KamPdfText.runAt(pi, x, y);
+    let r = KamPdfText.runAt(pi, x, y);
+    if (r && coveredRun(pi, r)) r = null;               // already removed: nothing to pick
     picked = r; pickedPage = pi;
     $('#hint').textContent = r ? 'Press Delete to remove this text, or double-click to edit it' : '';
     if (!r) updateProps();
@@ -175,15 +176,38 @@
     return !!r;
   };
 
-  /* ---------- Delete: cover the picked line so it disappears ---------- */
+  /* Is this line already sitting under something opaque of ours? If so it has been dealt
+     with, and it should stop offering itself for selection: otherwise deleted text keeps
+     lighting up and can be deleted over and over, as though it were never going away. */
+  function coveredRun(pi, r) {
+    const list = state.annots[state.pageIds[pi]] || [];
+    const cx = r.x + (r.w / 2) * Math.cos(r.rot * Math.PI / 180) - (r.h / 2) * Math.sin(r.rot * Math.PI / 180);
+    const cy = r.y + (r.w / 2) * Math.sin(r.rot * Math.PI / 180) + (r.h / 2) * Math.cos(r.rot * Math.PI / 180);
+    for (const a of list) {
+      if (a.hidden || a.pts || a.type !== 'rect' || !a.fill || a.blend) continue;
+      if ((a.opacity == null ? 1 : a.opacity) < 0.85) continue;
+      const t = a.rot * Math.PI / 180, c = Math.cos(t), s = Math.sin(t);
+      const dx = cx - a.x, dy = cy - a.y;
+      const lx = dx * c + dy * s, ly = -dx * s + dy * c;
+      if (lx >= -1 && ly >= -1 && lx <= a.w + 1 && ly <= a.h + 1) return true;
+    }
+    return false;
+  }
+  window.pdfTextRunCovered = coveredRun;
+
+  /* ---------- Delete: take the picked line out of the document for good ---------- */
   window.pdfTextDeleteSelected = () => {
     if (!picked || pickedPage !== state.cur) return false;
     const r = picked;
     pushAnnotUndo(state.pageIds[state.cur]);
-    curAnnots().push(coverFor(r, analyse(r)));
+    const cover = coverFor(r, analyse(r));
+    // A redaction, not a patch of paint: when you press Delete you mean the words to be gone,
+    // and a cover would leave them sitting in the file for anyone to extract.
+    cover.redact = true; cover.fill = '#ffffff';
+    curAnnots().push(cover);
     picked = null; hover = null;
     drawOverlay(); refreshThumb(state.cur); updateProps();
-    toast('Text removed. Ctrl+Z puts it back.');
+    toast('Deleted. The words are removed from the file when you save. Ctrl+Z undoes it.', 5000);
     return true;
   };
 
@@ -239,7 +263,7 @@
     if (!q) { updateCount(); drawOverlay(); return; }
     $('#findCount').textContent = 'Searching…';
     const token = ++searchToken;
-    const matches = await KamPdfText.search(q);
+    const matches = (await KamPdfText.search(q)).filter(m => !coveredRun(m.page, m.run));
     if (token !== searchToken) return;
     find.matches = matches;
     find.cur = matches.findIndex(m => m.page >= state.cur); if (find.cur < 0 && matches.length) find.cur = 0;

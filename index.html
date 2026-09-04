@@ -294,7 +294,7 @@ kbd{background:var(--kbd);border:1px solid var(--border);border-radius:4px;paddi
       <div class="row" id="formActions" style="display:none;margin-top:10px"><button id="btnApplyForm" class="primary">Apply values</button></div>
     </div>
     <div class="tab" id="tab-help">
-      <div class="muted" style="margin-bottom:10px">KAM PDFs <b>v1.5.0</b> · free forever · <a href="https://github.com/Ari-Joon/KAM-PDFs" target="_blank" rel="noopener" style="color:var(--accent)">GitHub</a></div>
+      <div class="row" style="margin-bottom:10px"><span class="muted">KAM PDFs <b id="appVersion">v?</b> · free forever · <a href="https://github.com/Ari-Joon/KAM-PDFs" target="_blank" rel="noopener" style="color:var(--accent)">GitHub</a></span><span style="flex:1"></span><button id="btnUpdate">Check for updates</button></div>
       <h4>Shortcuts</h4>
       <div class="muted" style="line-height:1.9">
         <kbd>V</kbd> select · <kbd>T</kbd> text · <kbd>P</kbd> pen · <kbd>H</kbd> highlight<br>
@@ -307,6 +307,7 @@ kbd{background:var(--kbd);border:1px solid var(--border);border-radius:4px;paddi
       <div class="muted" style="line-height:1.6">
         <b>Text:</b> click to place free text, or drag out a box first and the text wraps to that width. Drag the corner square to change the width. Double-click to edit. Paste an image from the clipboard with Ctrl+V.<br><br>
         Annotations are drawn on top of the page when you save. Whiteout only covers content visually; the underlying text stays in the file.<br><br>
+        <b>Deleting text:</b> click a line of the PDF's own text and press Delete. The words are removed from the file when you save, not painted over, so nobody can pull them back out. That page is rebuilt as a picture, with everything you did not delete put back as invisible text so it stays searchable.<br><br>
         <b>Layers:</b> the Layers tab lists everything you have added to the page, newest first. Click one to select it, hide it with ◉, move it forward or back with ▲▼, or delete it. Useful once marks start overlapping.<br><br>
         <b>Typing over a cover:</b> double-click anywhere, including inside a whiteout, and you get a text box there.<br><br>
         <b>Redact:</b> the ⬛ Redact tool removes what is underneath. When you save, that page is rebuilt from a picture of itself, so the hidden words are not in the file at all. Whiteout only covers text; anyone can still extract it.<br><br>
