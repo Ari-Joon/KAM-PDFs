@@ -204,7 +204,7 @@
     const cover = coverFor(r, analyse(r));
     // A redaction, not a patch of paint: when you press Delete you mean the words to be gone,
     // and a cover would leave them sitting in the file for anyone to extract.
-    cover.redact = true; cover.fill = '#ffffff';
+    cover.redact = true; cover.fill = '#ffffff'; cover.note = r.text;
     curAnnots().push(cover);
     picked = null; hover = null;
     drawOverlay(); refreshThumb(state.cur); updateProps();

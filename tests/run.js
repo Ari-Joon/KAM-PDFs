@@ -595,6 +595,89 @@ test('a cover does not block typing over it', async b => {
   ok(pages[0].includes('TYPED OVER'), 'text typed over a cover is missing from the saved file');
 });
 
+test('layers can be dragged into a new order', async b => {
+  await b.reload();
+  await b.evaluate(makeDoc(`doc.addPage([420, 300]).drawText('Base', { x: 30, y: 250, size: 14, font: f });`));
+  await b.waitFor(settled);
+  await b.evaluate(`(() => { const id = state.pageIds[0]; state.annots[id] = [
+      { id: uid(), type:'rect', x:30, y:40, w:60, h:20, rot:0, stroke:'#ff0000', fill:null, width:2, opacity:1 },
+      { id: uid(), type:'rect', x:30, y:80, w:60, h:20, rot:0, stroke:'#00ff00', fill:null, width:2, opacity:1 },
+      { id: uid(), type:'rect', x:30, y:120, w:60, h:20, rot:0, stroke:'#0000ff', fill:null, width:2, opacity:1 },
+    ]; drawOverlay(); refreshLayers(true); return 1; })()`);
+  eq(await b.evaluate(`curAnnots().map(a => a.stroke)`), ['#ff0000', '#00ff00', '#0000ff'], 'starting order');
+
+  // rows are newest first, so row 0 is the last item: drag it to the bottom row
+  await b.evaluate(`(() => {
+    const rows = [...document.querySelectorAll('#layerList .layer')];
+    const dt = new DataTransfer();
+    rows[0].dispatchEvent(new DragEvent('dragstart', { bubbles: true, dataTransfer: dt }));
+    rows[2].dispatchEvent(new DragEvent('drop', { bubbles: true, dataTransfer: dt }));
+    return 1; })()`);
+  eq(await b.evaluate(`curAnnots().map(a => a.stroke)`), ['#0000ff', '#ff0000', '#00ff00'], 'the dragged layer moved to the back');
+  await b.evaluate(`undo()`);
+  eq(await b.evaluate(`curAnnots().map(a => a.stroke)`), ['#ff0000', '#00ff00', '#0000ff'], 'undo restores the order');
+});
+
+test('a working copy survives the window closing', async b => {
+  await b.reload();
+  await b.evaluate(makeDoc(`
+    doc.addPage([420, 300]).drawText('Original page', { x: 30, y: 250, size: 14, font: f });
+    doc.addPage([420, 300]).drawText('Second page', { x: 30, y: 250, size: 14, font: f });`));
+  await b.waitFor(settled);
+  await b.evaluate(`(() => { pushAnnotUndo(state.pageIds[0]);
+    const a = { id: uid(), type:'text', x:40, y:120, w:0, h:0, rot:0, text:'MY WORK', size:14, font:'Helvetica', bold:false, color:'#e11d48', opacity:1 };
+    measureText(a); curAnnots().push(a); drawOverlay(); return 1; })()`);
+  await b.evaluate(`document.getElementById('autosaveOn').checked = true; 1`);
+
+  // start from nothing kept, so an earlier test's copy cannot be mistaken for this one
+  await b.evaluate(`KamDraft.clear()`);
+  await b.evaluate(`noteChange()`);
+  await b.waitFor(`KamDraft.get().then(d => !!d && d.annots && d.annots.length === 2 && d.annots[0].length > 0)`, 20000);
+  const kept = await b.evaluate(`KamDraft.get().then(d => JSON.stringify({ name: d.fileName, pages: d.annots.length, text: d.annots[0][0].text, hasBytes: d.bytes.byteLength > 100 }))`);
+  const k = JSON.parse(kept);
+  eq(k.pages, 2, 'both pages kept');
+  eq(k.text, 'MY WORK', 'the mark was kept');
+  ok(k.hasBytes, 'the document itself was kept');
+
+  // now start over, as though the window had been closed, and restore
+  await b.reload();
+  eq(await b.evaluate(`!!state.doc`), false, 'a fresh start has no document');
+  await b.waitFor(`!document.getElementById('btnRestoreEmpty').hidden`, 10000);
+  await b.evaluate(`document.getElementById('btnRestoreEmpty').click()`);
+  // the document opens before the marks are put back, so wait for the whole restore
+  await b.waitFor(`!!state.doc && state.pageIds.length === 2 && !state.renderTask && curAnnots().length > 0`, 20000);
+  eq(await b.evaluate(`curAnnots().map(a => a.text)`), ['MY WORK'], 'the work came back');
+  eq(await b.evaluate(`state.nextId > curAnnots()[0].id`), true, 'new marks will not reuse a restored id');
+
+  // and Forget really removes it
+  await b.evaluate(`document.getElementById('btnForget').click()`);
+  await b.waitFor(`KamDraft.get().then(d => d === null)`, 10000);
+  eq(await b.evaluate(`KamDraft.get().then(d => d === null)`), true, 'Forget clears the stored copy');
+});
+
+test('shift constrains shapes and lines', async b => {
+  await b.reload();
+  await b.evaluate(makeDoc(`doc.addPage([420, 300]);`));
+  await b.waitFor(settled);
+  const dragShift = (tool, x1, y1, x2, y2) => `(() => {
+    setTool('${tool}');
+    const ov = document.getElementById('overlay'), rc = ov.getBoundingClientRect(), z = state.zoom;
+    ov.setPointerCapture = () => {};
+    const P = (t,x,y) => new PointerEvent(t, { clientX: rc.left + x*z, clientY: rc.top + y*z, button:0, bubbles:true, pointerId:1, shiftKey:true });
+    ov.dispatchEvent(P('pointerdown', ${x1}, ${y1}));
+    ov.dispatchEvent(P('pointermove', ${x2}, ${y2}));
+    ov.dispatchEvent(P('pointerup', ${x2}, ${y2}));
+    return 1; })()`;
+  await b.evaluate(dragShift('rect', 40, 40, 200, 100));
+  const r = await b.evaluate(`(a => JSON.stringify({ w: Math.round(a.w), h: Math.round(a.h) }))(curAnnots()[0])`);
+  const box = JSON.parse(r);
+  eq(box.w, box.h, 'shift should make a square');
+
+  await b.evaluate(dragShift('line', 40, 200, 200, 210));
+  const l = await b.evaluate(`(a => Math.round(Math.abs(a.pts[1][1] - a.pts[0][1])))(curAnnots()[1])`);
+  eq(l, 0, 'shift should hold the line level');
+});
+
 test('undo and redo step through changes', async b => {
   await b.reload();
   await b.evaluate(makeDoc(`doc.addPage([420, 300]).drawText('Base', { x: 30, y: 250, size: 14, font: f });`));

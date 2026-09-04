@@ -14,7 +14,10 @@
     if (a.type === 'image') return { kind: 'Image', detail: `${Math.round(a.w)} × ${Math.round(a.h)}` };
     if (a.pts) return { kind: a.type === 'pen' ? 'Pen' : a.type === 'arrow' ? 'Arrow' : 'Line', detail: `${a.pts.length} points` };
     if (a.type === 'ellipse') return { kind: 'Ellipse', detail: `${Math.round(a.w)} × ${Math.round(a.h)}` };
-    if (a.redact) return { kind: 'Redaction', detail: 'removes what is under it' };
+    if (a.redact) {
+      const t = (a.note || '').replace(/\s+/g, ' ').trim();
+      return { kind: 'Deleted', detail: t ? `"${t.slice(0, 26)}${t.length > 26 ? '…' : ''}"` : 'removed from the file' };
+    }
     if (a.blend === 'multiply') return { kind: 'Highlight', detail: a.fill };
     if (!a.stroke && a.fill) return { kind: 'Cover', detail: a.fill === '#ffffff' ? 'white' : a.fill };
     return { kind: 'Rectangle', detail: `${Math.round(a.w)} × ${Math.round(a.h)}` };
@@ -45,6 +48,22 @@
       const a = list[i], d = describe(a);
       const row = document.createElement('div');
       row.className = 'layer' + (state.selected === a ? ' on' : '') + (a.hidden ? ' off' : '');
+      row.draggable = true;
+      row.dataset.i = i;
+      row.addEventListener('dragstart', e => { e.dataTransfer.setData('text/plain', String(i)); e.dataTransfer.effectAllowed = 'move'; row.classList.add('dragging'); });
+      row.addEventListener('dragend', () => row.classList.remove('dragging'));
+      row.addEventListener('dragover', e => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; row.classList.add('dropinto'); });
+      row.addEventListener('dragleave', () => row.classList.remove('dropinto'));
+      row.addEventListener('drop', e => {
+        e.preventDefault(); row.classList.remove('dropinto');
+        const from = parseInt(e.dataTransfer.getData('text/plain'), 10);
+        if (isNaN(from) || from === i) return;
+        commitTextEdit();
+        pushAnnotUndo(state.pageIds[state.cur]);
+        const [moved] = list.splice(from, 1);
+        list.splice(i, 0, moved);
+        updateProps(); drawOverlay(); refreshThumb(state.cur); render(true);
+      });
       row.innerHTML = `<span class="layer-dot" style="background:${swatch(a)}"></span>
         <span class="layer-name"><b>${d.kind}</b> <span class="muted">${d.detail}</span></span>
         <button class="layer-btn" data-act="eye" title="${a.hidden ? 'Show' : 'Hide'}">${a.hidden ? '◌' : '◉'}</button>

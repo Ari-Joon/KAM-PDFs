@@ -68,6 +68,8 @@ Unzip and open `index.html` in Chrome, Edge, Firefox, or Safari. Everything work
 
 **Layers**
 - Every mark you add is listed in the Layers tab, newest first: select, hide, reorder or delete any of them
+- Drag a row up or down to change what sits on top, or use the arrows
+- Deleted text is listed too, quoting the words that were removed, so you can find and undo a deletion later
 - Marks pile up quickly when you cover and retype things, and the list is how you reach the one underneath
 - Double-click anywhere, including inside a whiteout, to type there
 
@@ -83,6 +85,8 @@ Unzip and open `index.html` in Chrome, Edge, Firefox, or Safari. Everything work
 - Fixed-width text boxes that wrap automatically, or free-floating text
 - Move, resize, recolour, and delete anything you added, with undo and redo
 - Copy, paste, duplicate, and nudge annotations with the keyboard; paste images from the clipboard
+- Hold Shift to keep a rectangle or ellipse square, or snap a line or arrow to 45 degrees
+- Signatures you draw are kept, so you can reuse one with a click instead of drawing it again
 - Spell checking on text you add: misspellings are underlined, with suggested corrections and your own dictionary for names and jargon
 
 **Scan**
@@ -100,6 +104,7 @@ Unzip and open `index.html` in Chrome, Edge, Firefox, or Safari. Everything work
 - Export a page as a PNG
 - Print
 - Light and dark mode (the ☀ / 🌙 button, remembered between sessions)
+- A working copy is kept on your computer as you go, so a crash or a closed window does not cost you the afternoon. Reopen the app and it offers your last session back. Nothing is uploaded, and Forget removes it
 
 ## Screenshots
 
@@ -164,9 +169,8 @@ Phone scanner page: https://ari-joon.github.io/KAM-PDFs/scan.html
 | Arrow keys | Nudge the selected annotation (Shift for 10x) |
 | `Ctrl+F` | Find in document (Enter / Shift+Enter to step) |
 | `X` | Redact tool |
-| Double-click | Type here, or edit the text under the cursor |
-| `Ctrl+C` | Copy selected page text |
-| Double-click | Edit a line of existing text, or a text box you added |
+| Double-click | Edit the text under the cursor, or type where there is none |
+| `Shift` while drawing | Square rectangles and circles; 45 degree lines and arrows |
 | `Ctrl+S` / `Ctrl+P` | Save PDF / print |
 | `←` `→` | Previous / next page (nothing selected) |
 | `Ctrl` + mouse wheel | Zoom |
@@ -189,6 +193,7 @@ pdftext-ui.js           edit, select, delete existing text, and the Find bar
 ocr.js                  reading text off a scan (Tesseract, bundled)
 ocr-ui.js               the OCR buttons and the invisible text layer
 layers.js               the Layers panel
+autosave.js             the working copy kept in this browser's storage
 tests/run.js            the test suite: node tests/run.js
 spell.js                dictionary loading, checking and suggestions
 spell-ui.js             underlines and the spelling review dialog
@@ -216,8 +221,9 @@ Install KAM PDFs.bat    double-click installer (Windows)
 node tests/run.js
 ```
 
-Fifteen tests covering page operations, annotation fidelity, form fields, text editing,
-selection, find, spell checking, redaction, OCR, undo and the scanner. Needs Node 18+ and
+Nineteen tests covering page operations, annotation fidelity, form fields, text editing,
+selection, find, spell checking, redaction, OCR, layers, the working copy, undo and the
+scanner. Needs Node 18+ and
 Chrome; nothing to install. See [tests/README.md](tests/README.md) for what each one checks
 and why one of them deliberately uses a second rendering engine.
 

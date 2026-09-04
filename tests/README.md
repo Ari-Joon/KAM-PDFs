@@ -31,6 +31,9 @@ anything fails, so it works as a pre-commit or CI check.
 | deleting a line | the words leave the file, the rest of the page keeps its text, and the line stops coming back |
 | layers panel | marks are listed, hidden, reordered and deleted; hidden ones stay out of the file |
 | covers | double-clicking inside a whiteout still gives you somewhere to type |
+| dragging layers | a row dropped on another lands in that position, and the page redraws to match |
+| the working copy | a change is kept, survives a reload, comes back with its marks, and Forget clears it |
+| shift constraints | rectangles and ellipses stay square; lines and arrows snap to 45 degrees |
 | undo and redo | changes step backwards and forwards |
 | scanner | page corners found in a photograph |
 
@@ -58,6 +61,9 @@ Without them that one assertion is skipped and reported as skipped, not silently
   and asserts the right text was handed to it.
 - OCR downloads nothing: it uses the recogniser bundled in `lib/ocr`. That test takes a few
   seconds longer than the rest.
+- The restore test waits for the marks to come back, not just for the document to open: the
+  file opens first and the marks are attached a moment later, so a shorter wait passes while
+  the restore is still half done.
 - Hiding is not deleting. The tests assert that a whiteout and an in-place text edit leave the
   original words extractable, and that only Redact removes them. That is deliberate: it is the
   documented behaviour, and a test that expected otherwise would be encoding a false promise.

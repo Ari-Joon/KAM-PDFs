@@ -127,6 +127,10 @@ input[type=range]{accent-color:var(--accent)}
 #modalBox textarea{width:100%;min-height:260px;font-family:ui-monospace,Consolas,monospace;font-size:12px}
 #modalBox .primary{background:var(--accent);border-color:var(--accent);color:var(--accent-text)}
 #sigPad{background:#fff;border-radius:6px;touch-action:none;display:block;cursor:crosshair;border:1px solid var(--border);max-width:100%}
+.sig-saved{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px}
+.sig-card{position:relative;background:#fff;border:1px solid var(--border);border-radius:6px;padding:4px}
+.sig-card img{height:52px;display:block;cursor:pointer}
+.sig-del{position:absolute;top:-7px;right:-7px;width:20px;height:20px;padding:0;border-radius:999px;font-size:11px;line-height:1}
 .scan-grid{display:grid;grid-template-columns:1fr 1fr;gap:20px;min-width:min(640px,86vw)}
 .scan-grid[hidden],#scanEditor[hidden]{display:none}
 .scan-col h4{margin:0 0 8px;font-size:12px;text-transform:uppercase;letter-spacing:.6px;color:var(--muted)}
@@ -143,6 +147,8 @@ input[type=range]{accent-color:var(--accent)}
 .layer:hover{background:var(--btn)}
 .layer.on{background:var(--thumb-sel);outline:1px solid var(--accent)}
 .layer.off .layer-name{opacity:.45;text-decoration:line-through}
+.layer.dragging{opacity:.4}
+.layer.dropinto{outline:2px dashed var(--accent);outline-offset:-2px}
 .layer-dot{width:12px;height:12px;border-radius:3px;border:1px solid var(--border);flex:none}
 .layer-name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px}
 .layer-btn{padding:1px 5px;font-size:11px;line-height:1.5}
@@ -239,7 +245,7 @@ kbd{background:var(--kbd);border:1px solid var(--border);border-radius:4px;paddi
         <img src="logo.svg" alt="KAM logo" style="width:112px;height:112px;border-radius:24px;box-shadow:0 8px 28px rgba(0,0,0,.5)">
         <div style="font-size:22px;font-weight:800;color:#f5b400;letter-spacing:1px">KAM <span style="color:#e6e6ea;font-weight:500">PDFs</span></div>
         <div>Open a PDF to get started, or drop one anywhere</div>
-        <div class="group"><button id="btnOpen2" class="primary">Open PDF</button><button id="btnNew2">New blank document</button><button id="btnScan2">📷 Scan a document</button></div>
+        <div class="group"><button id="btnOpen2" class="primary">Open PDF</button><button id="btnNew2">New blank document</button><button id="btnScan2">📷 Scan a document</button><button id="btnRestoreEmpty" hidden>Restore last session</button></div>
         <div class="muted">Free, offline, no sign-up. Files never leave your computer.</div>
       </div>
     </div>
@@ -274,6 +280,11 @@ kbd{background:var(--kbd);border:1px solid var(--border);border-radius:4px;paddi
       <div class="row"><button id="btnOcrPage">Read this page</button><button id="btnOcrAll">Read all pages</button></div>
       <div id="ocrState" class="muted"></div>
       <div class="muted">Finds the words in a scan and adds them to the saved PDF as an invisible layer, so it becomes searchable. Runs on your computer.</div>
+      <h4>Working copy</h4>
+      <div class="row"><label><input type="checkbox" id="autosaveOn" checked> Keep a copy so a crash does not lose your work</label></div>
+      <div class="row"><button id="btnRestore" hidden>Restore last session</button><button id="btnForget">Forget saved work</button></div>
+      <div id="autosaveState" class="muted"></div>
+      <div class="muted">Kept only in this browser on this computer. Nothing is uploaded.</div>
       <h4>Spelling</h4>
       <div class="row"><label><input type="checkbox" id="spellUnderline" checked> Underline misspelled words</label></div>
       <div class="row"><button id="btnSpell">Check spelling</button><span id="spellState" class="muted"></span></div>
@@ -286,7 +297,7 @@ kbd{background:var(--kbd);border:1px solid var(--border);border-radius:4px;paddi
       <div class="row"><button id="btnMeta">Apply metadata</button></div>
     </div>
     <div class="tab" id="tab-layers">
-      <div class="row"><span class="muted" style="flex:1">Everything you have added to this page, newest first.</span><button id="btnLayersClear">Clear page</button></div>
+      <div class="row"><span class="muted" style="flex:1">Everything you have added to this page, newest first. Drag a row to restack it.</span><button id="btnLayersClear">Clear page</button></div>
       <div id="layerList"></div>
     </div>
     <div class="tab" id="tab-form">
@@ -301,20 +312,23 @@ kbd{background:var(--kbd);border:1px solid var(--border);border-radius:4px;paddi
         <kbd>R</kbd> rect · <kbd>E</kbd> ellipse · <kbd>L</kbd> line · <kbd>A</kbd> arrow · <kbd>W</kbd> whiteout<br>
         <kbd>Del</kbd> delete · <kbd>Ctrl+Z</kbd> undo · <kbd>Ctrl+Y</kbd> redo · <kbd>Esc</kbd> deselect<br>
         <kbd>Ctrl+C</kbd>/<kbd>Ctrl+V</kbd> copy/paste · <kbd>Ctrl+D</kbd> duplicate · arrows nudge (Shift = 10)<br>
-        <kbd>←</kbd>/<kbd>→</kbd> pages · <kbd>Ctrl</kbd>+wheel zoom · <kbd>Ctrl+S</kbd> save · <kbd>Ctrl+P</kbd> print
+        <kbd>←</kbd>/<kbd>→</kbd> pages · <kbd>Ctrl</kbd>+wheel zoom · <kbd>Ctrl+S</kbd> save · <kbd>Ctrl+P</kbd> print<br>
+        <kbd>Shift</kbd> while drawing · square shapes, 45° lines
       </div>
       <h4>Tips</h4>
       <div class="muted" style="line-height:1.6">
         <b>Text:</b> click to place free text, or drag out a box first and the text wraps to that width. Drag the corner square to change the width. Double-click to edit. Paste an image from the clipboard with Ctrl+V.<br><br>
         Annotations are drawn on top of the page when you save. Whiteout only covers content visually; the underlying text stays in the file.<br><br>
         <b>Deleting text:</b> click a line of the PDF's own text and press Delete. Deleted areas are marked with a red hatch on screen so you can see them; the hatch is not in the saved file, only clean paper. Clicking a hatched area selects the deletion, so pressing Delete again takes the deletion away and the words come back.<br><br>
-        <b>Layers:</b> the Layers tab lists everything you have added to the page, newest first. Click one to select it, hide it with ◉, move it forward or back with ▲▼, or delete it. Useful once marks start overlapping.<br><br>
+        <b>Layers:</b> the Layers tab lists everything you have added to the page, newest first. Click one to select it, hide it with ◉, move it forward or back with ▲▼, or delete it. You can also drag a row up or down to put it where you want. Deleted text is listed too, quoting the words that were removed, so you can find a deletion and take it back. Useful once marks start overlapping.<br><br>
         <b>Typing over a cover:</b> double-click anywhere, including inside a whiteout, and you get a text box there.<br><br>
         <b>Redact:</b> the ⬛ Redact tool removes what is underneath. When you save, that page is rebuilt from a picture of itself, so the hidden words are not in the file at all. Whiteout only covers text; anyone can still extract it.<br><br>
         <b>Select and copy:</b> drag across text already in the PDF to select it, then Ctrl+C. A single click picks a line so Delete can remove it.<br><br>
         <b>Scanned pages:</b> "Read this page" under Scanned pages finds the words in a scan and adds them to the saved PDF as an invisible layer, so it becomes searchable. It runs on your computer.<br><br>
         <b>Edit existing text:</b> with the Select tool, hover over any text already in the PDF and it lights up. Double-click it to edit that line in place: the original is covered with the page's own background colour and replaced by a text box you can type in, matched for size and colour. Delete everything in the box to remove the line. <b>Find</b> (Ctrl+F) searches the whole document.<br><br>
         <b>Spelling:</b> misspelled words in text you add get a red dotted underline, and your browser underlines them while you type (right-click for its suggestions). "Check spelling" in the Document tab lists every one with corrections, and you can add words to your own dictionary.<br><br>
+        <b>Signatures:</b> a signature you draw is kept on this computer, so next time you can pick it from the gallery in the Sign box instead of drawing it again.<br><br>
+        <b>Your work is kept as you go:</b> a working copy of the document and everything you have added is stored in this browser on this computer. If the window closes or the computer restarts, reopen KAM PDFs and it offers your last session back. Nothing is uploaded. Turn it off or clear it under Working copy in the Document tab.<br><br>
         <b>Scan:</b> click 📷 Scan, point your phone at the QR code, photograph pages on the phone and tap Send. Pages arrive here straightened and cleaned up. No phone? Use the webcam or clean up existing photos.<br><br>
         Password-protected PDFs can't be opened. Print them to a new PDF first.
       </div>
@@ -344,6 +358,7 @@ kbd{background:var(--kbd);border:1px solid var(--border);border-radius:4px;paddi
 <script src="ocr.js"></script>
 <script src="ocr-ui.js"></script>
 <script src="layers.js"></script>
+<script src="autosave.js"></script>
 <script src="scan-desktop.js"></script>
 <script>
 if ("serviceWorker" in navigator && location.protocol.startsWith("http")) {

@@ -5,7 +5,7 @@ pdfjsLib.GlobalWorkerOptions.workerSrc = 'lib/pdf.worker.min.js';
 
 /* Bumped with each release, and shown in the Help tab. Because it lives in the code that
    is actually running, it tells you which version you have rather than which is newest. */
-const KAM_VERSION = '1.11.2';
+const KAM_VERSION = '1.12.0';
 
 const $ = s => document.querySelector(s);
 const $$ = s => [...document.querySelectorAll(s)];
@@ -96,6 +96,7 @@ async function rebuild() {
   await renderPage();
   renderThumbs();
   updatePager();
+  if (typeof noteChange === 'function') noteChange();
 }
 
 /* ---------- main page rendering ---------- */
@@ -312,7 +313,7 @@ $$('.tabs button').forEach(b => b.onclick = () => {
 });
 
 /* ---------- undo ---------- */
-function pushUndo(entry) { state.undo.push(entry); if (state.undo.length > 25) state.undo.shift(); state.redo = []; state.dirty = true; }
+function pushUndo(entry) { state.undo.push(entry); if (state.undo.length > 25) state.undo.shift(); state.redo = []; state.dirty = true; if (typeof noteChange === 'function') noteChange(); }
 function snapshotAnnots(pageIds) {
   const pages = {}; for (const id of pageIds) pages[id] = JSON.stringify(state.annots[id] || []);
   return { kind: 'annot', pages };

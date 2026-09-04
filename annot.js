@@ -357,8 +357,21 @@ overlay.addEventListener('pointermove', e => {
   }
   const [x, y] = evtPt(e); const a = drag.a;
   if (drag.mode === 'draw') { const l = a.pts[a.pts.length - 1]; if (Math.hypot(x - l[0], y - l[1]) > 0.7) a.pts.push([x, y]); }
-  else if (drag.mode === 'line') { a.pts[1] = [x, y]; }
-  else if (drag.mode === 'shape') { const [sx, sy] = drag.start; a.x = Math.min(sx, x); a.y = Math.min(sy, y); a.w = Math.abs(x - sx); a.h = Math.abs(y - sy); }
+  else if (drag.mode === 'line') {
+    let [ex, ey] = [x, y];
+    if (e.shiftKey) {                                  // hold Shift for a straight or 45 degree line
+      const [sx, sy] = a.pts[0], dx = ex - sx, dy = ey - sy;
+      const step = Math.PI / 4, ang = Math.round(Math.atan2(dy, dx) / step) * step, len = Math.hypot(dx, dy);
+      ex = sx + Math.cos(ang) * len; ey = sy + Math.sin(ang) * len;
+    }
+    a.pts[1] = [ex, ey];
+  }
+  else if (drag.mode === 'shape') {
+    const [sx, sy] = drag.start;
+    let w = Math.abs(x - sx), h = Math.abs(y - sy);
+    if (e.shiftKey) { const s = Math.min(w, h); w = h = s; }   // Shift for a square or circle
+    a.x = x < sx ? sx - w : sx; a.y = y < sy ? sy - h : sy; a.w = w; a.h = h;
+  }
   else if (drag.mode === 'textbox') { drag.cur = [x, y]; }
   else if (drag.mode === 'seltext') {
     if (Math.hypot(x - drag.start[0], y - drag.start[1]) > 1.5) drag.moved = true;
@@ -473,11 +486,44 @@ $('#imgAnnotInput').addEventListener('change', async e => {
   const f = e.target.files[0]; e.target.value = ''; if (!f) return;
   try { placeImage(await fileToImageAnnot(f)); } catch (err) { toast('Could not load image'); }
 });
+/* Signatures you keep, so you draw yours once rather than every time. Stored on this
+   computer only, in the browser's own storage. */
+function savedSignatures() {
+  try { return JSON.parse(localStorage.getItem('kam-signatures') || '[]'); } catch (e) { return []; }
+}
+function storeSignature(src) {
+  const all = savedSignatures().filter(s => s !== src);
+  all.unshift(src);
+  try { localStorage.setItem('kam-signatures', JSON.stringify(all.slice(0, 6))); } catch (e) { toast('Could not save the signature (storage full)'); }
+}
+function forgetSignature(src) {
+  try { localStorage.setItem('kam-signatures', JSON.stringify(savedSignatures().filter(s => s !== src))); } catch (e) { }
+}
 $('#btnSign').onclick = () => {
   if (!state.doc) return toast('Open a PDF first');
-  showModal(`<h3>Draw your signature</h3><canvas id="sigPad" width="600" height="220"></canvas>
+  const saved = savedSignatures();
+  const gallery = saved.length
+    ? `<div class="muted" style="margin-bottom:6px">Your saved signatures. Click one to place it.</div>
+       <div class="sig-saved">${saved.map((s, i) => `<div class="sig-card"><img src="${s}" data-i="${i}" alt="saved signature"><button class="sig-del" data-i="${i}" title="Forget this signature">✕</button></div>`).join('')}</div>`
+    : '';
+  showModal(`<h3>Signature</h3>${gallery}
+    <div class="muted" style="margin-bottom:6px">${saved.length ? 'Or draw a new one:' : 'Draw your signature:'}</div>
+    <canvas id="sigPad" width="600" height="220"></canvas>
     <div class="row" style="margin-top:10px"><label>Color <input type="color" id="sigColor" value="#1e3a8a"></label>
-    <button id="sigClear">Clear</button><span style="flex:1"></span><button id="sigCancel">Cancel</button><button id="sigUse" class="primary">Use signature</button></div>`);
+    <button id="sigClear">Clear</button><label><input type="checkbox" id="sigKeep" checked> Remember this signature</label>
+    <span style="flex:1"></span><button id="sigCancel">Cancel</button><button id="sigUse" class="primary">Use signature</button></div>`);
+  $$('#modalBox .sig-card img').forEach(img => img.onclick = async () => {
+    const src = savedSignatures()[+img.dataset.i]; if (!src) return;
+    const probe = new Image(); probe.src = src;
+    await new Promise(r => { if (probe.complete) r(); else probe.onload = r; });
+    hideModal();
+    placeImage({ src, fmt: 'png', iw: probe.naturalWidth || 300, ih: probe.naturalHeight || 100 }, 0.3);
+  });
+  $$('#modalBox .sig-del').forEach(btn => btn.onclick = e => {
+    e.stopPropagation();
+    forgetSignature(savedSignatures()[+btn.dataset.i]);
+    btn.closest('.sig-card').remove();
+  });
   const pad = $('#sigPad'), ctx = pad.getContext('2d'); let down = false, last = null, drawn = false;
   ctx.lineWidth = 3; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
   const pt = e => { const r = pad.getBoundingClientRect(); return [(e.clientX - r.left) * pad.width / r.width, (e.clientY - r.top) * pad.height / r.height]; };
@@ -493,8 +539,10 @@ $('#btnSign').onclick = () => {
     for (let y = 0; y < pad.height; y++) for (let x = 0; x < pad.width; x++) if (d[(y * pad.width + x) * 4 + 3] > 0) { if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y; }
     const c = document.createElement('canvas'); c.width = x1 - x0 + 9; c.height = y1 - y0 + 9;
     c.getContext('2d').drawImage(pad, x0 - 4, y0 - 4, c.width, c.height, 0, 0, c.width, c.height);
+    const src = c.toDataURL('image/png');
+    if ($('#sigKeep') && $('#sigKeep').checked) storeSignature(src);
     hideModal();
-    placeImage({ src: c.toDataURL('image/png'), fmt: 'png', iw: c.width, ih: c.height }, 0.3);
+    placeImage({ src, fmt: 'png', iw: c.width, ih: c.height }, 0.3);
   };
 };
 
