@@ -63,6 +63,7 @@ Unzip and open `index.html` in Chrome, Edge, Firefox, or Safari. Everything work
 **Edit the text that's already there**
 - Hover over any line of existing text and double-click to edit it in place, matched for position, size, font and colour
 - Drag across text to select it and Ctrl+C to copy; click a line and press Delete and the words are removed from the file, not just hidden
+- Deleted areas are hatched in red on screen so you can see them. The hatch is not saved, and clicking one selects the deletion, so Delete there puts the words back
 - Find (Ctrl+F) searches the whole document and steps through matches
 
 **Layers**

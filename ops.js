@@ -340,7 +340,7 @@ async function rasterisePage(i, dpi = 180) {
     const im = getImg(a); if (im.complete) return res();
     im.addEventListener('load', res, { once: true }); im.addEventListener('error', res, { once: true });
   })));
-  drawAnnots(ctx, state.pageIds[i], scale, null, { spell: false });
+  drawAnnots(ctx, state.pageIds[i], scale, null, { spell: false, marks: false });
   return { canvas: c, w: base.width, h: base.height };
 }
 
@@ -532,6 +532,6 @@ $('#btnPng').onclick = async () => {
   const c = document.createElement('canvas'); c.width = vp.width; c.height = vp.height;
   const ctx = c.getContext('2d');
   await page.render({ canvasContext: ctx, viewport: vp }).promise;
-  drawAnnots(ctx, curPageId(), 2, null, { spell: false });
+  drawAnnots(ctx, curPageId(), 2, null, { spell: false, marks: false });
   c.toBlob(b => { downloadBytes(b, state.fileName.replace(/\.pdf$/i, '') + `-page${state.cur + 1}.png`, 'image/png'); }, 'image/png');
 };

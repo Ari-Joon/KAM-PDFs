@@ -56,8 +56,25 @@ function arrowHead(a) {
 /* ---------- drawing ---------- */
 function drawAnnots(ctx, pageId, s, selected, opts) {
   const spell = !opts || opts.spell !== false;
-  for (const a of (state.annots[pageId] || [])) { if (!a._editing && !a.hidden) drawAnnot(ctx, a, s, spell); }
+  const marks = !opts || opts.marks !== false;
+  for (const a of (state.annots[pageId] || [])) { if (!a._editing && !a.hidden) drawAnnot(ctx, a, s, spell, marks); }
   if (selected) drawSelection(ctx, selected, s);
+}
+/* A deletion is a white patch, which on white paper is invisible: you cannot tell the area
+   has been dealt with, and clicking there and pressing Delete quietly takes the patch away
+   and brings the words back. So on screen it gets hatched. Never drawn into the file. */
+function drawRedactionMark(ctx, w, h, s) {
+  const dpr = window.devicePixelRatio || 1;
+  ctx.save();
+  ctx.beginPath(); ctx.rect(0, 0, w, h); ctx.clip();
+  ctx.strokeStyle = 'rgba(225,29,72,.30)'; ctx.lineWidth = Math.max(1, dpr);
+  const step = Math.max(6 * dpr, 7 * s);
+  for (let x = -h; x < w + h; x += step) { ctx.beginPath(); ctx.moveTo(x, h); ctx.lineTo(x + h, 0); ctx.stroke(); }
+  ctx.restore();
+  ctx.save();
+  ctx.strokeStyle = 'rgba(225,29,72,.75)'; ctx.lineWidth = Math.max(1, dpr);
+  ctx.setLineDash([4 * dpr, 3 * dpr]); ctx.strokeRect(0, 0, w, h);
+  ctx.restore();
 }
 /* Red dotted underline beneath misspelled words. Screen only: it is never exported. */
 function drawSpellMarks(ctx, a, s) {
@@ -78,7 +95,7 @@ function drawSpellMarks(ctx, a, s) {
   });
   ctx.restore();
 }
-function drawAnnot(ctx, a, s, spell) {
+function drawAnnot(ctx, a, s, spell, marks) {
   ctx.save();
   ctx.globalAlpha = a.opacity == null ? 1 : a.opacity;
   if (a.blend === 'multiply') ctx.globalCompositeOperation = 'multiply';
@@ -100,6 +117,7 @@ function drawAnnot(ctx, a, s, spell) {
     } else if (a.type === 'rect') {
       if (a.fill) { ctx.fillStyle = a.fill; ctx.fillRect(0, 0, w, h); }
       if (a.stroke) { ctx.strokeStyle = a.stroke; ctx.lineWidth = a.width * s; ctx.strokeRect(0, 0, w, h); }
+      if (marks && a.redact) drawRedactionMark(ctx, w, h, s);
     } else if (a.type === 'ellipse') {
       ctx.beginPath(); ctx.ellipse(w / 2, h / 2, Math.abs(w / 2), Math.abs(h / 2), 0, 0, Math.PI * 2);
       if (a.fill) { ctx.fillStyle = a.fill; ctx.fill(); }
@@ -262,6 +280,9 @@ function deleteSelected() {
   pushAnnotUndo(curPageId());
   const list = curAnnots(); list.splice(list.indexOf(a), 1);
   state.selected = null; drawOverlay(); refreshThumb(state.cur); updateProps();
+  // Say so out loud: removing a deletion puts the original words back, and doing that by
+  // accident is how "delete" ends up looking as though it never worked.
+  if (a.redact) toast('Deletion removed, so the text underneath is back. Ctrl+Z to undo.', 5000);
 }
 
 /* ---------- pointer handling ---------- */

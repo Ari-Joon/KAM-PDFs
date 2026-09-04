@@ -5,7 +5,7 @@ pdfjsLib.GlobalWorkerOptions.workerSrc = 'lib/pdf.worker.min.js';
 
 /* Bumped with each release, and shown in the Help tab. Because it lives in the code that
    is actually running, it tells you which version you have rather than which is newest. */
-const KAM_VERSION = '1.11.0';
+const KAM_VERSION = '1.11.1';
 
 const $ = s => document.querySelector(s);
 const $$ = s => [...document.querySelectorAll(s)];
@@ -192,7 +192,7 @@ async function renderThumb(i, c) {
   }
   c.width = off.width; c.height = off.height;
   const ctx = c.getContext('2d'); ctx.drawImage(off, 0, 0);
-  drawAnnots(ctx, state.pageIds[i], off._scale, null, { spell: false });
+  drawAnnots(ctx, state.pageIds[i], off._scale, null, { spell: false, marks: false });
 }
 let thumbRefreshTimer;
 function refreshThumb(i) {

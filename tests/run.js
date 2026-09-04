@@ -480,6 +480,55 @@ test('deleting a line removes it but keeps the rest of the page', async b => {
   ok(!leaked, 'deleted words found inside the saved file');
 });
 
+test('a deletion is visible on screen but not in the file', async b => {
+  await b.reload();
+  await b.evaluate(makeDoc(`doc.addPage([420, 300]).drawText('DELETEME line', { x: 30, y: 250, size: 14, font: f });`));
+  await b.waitFor(settled);
+  await b.evaluate(`KamPdfText.index(0)`);
+  await b.evaluate(`setTool('select')`);
+  await b.evaluate(`pdfTextSelect(60, 46)`);
+  eq(await b.evaluate(`pdfTextDeleteSelected()`), true, 'the line was deleted');
+
+  // On white paper a white patch is invisible, which is how a deletion gets clicked and
+  // undone by accident. On screen it must be marked; in the file it must not be.
+  const diff = await b.evaluate(`(async () => {
+    const p = await state.pdfjs.getPage(1); const vp = p.getViewport({ scale: 2 });
+    const mk = async marks => {
+      const c = document.createElement('canvas'); c.width = vp.width; c.height = vp.height;
+      const ctx = c.getContext('2d');
+      await p.render({ canvasContext: ctx, viewport: p.getViewport({ scale: 2 }) }).promise;
+      drawAnnots(ctx, state.pageIds[0], 2, null, { spell: false, marks });
+      return ctx.getImageData(0, 0, c.width, c.height).data;
+    };
+    const shown = await mk(true), plain = await mk(false);
+    let differing = 0;
+    for (let i = 0; i < shown.length; i += 4)
+      if (Math.abs(shown[i] - plain[i]) + Math.abs(shown[i+1] - plain[i+1]) + Math.abs(shown[i+2] - plain[i+2]) > 40) differing++;
+    return differing;
+  })()`);
+  ok(diff > 200, `a deletion should be clearly marked on screen, only ${diff} pixels differ`);
+
+  // the saved file must show clean paper there, with no hatching baked in
+  const b64 = await b.evaluate(exportBase64);
+  const pages = await b.evaluate(textOf(b64));
+  ok(!pages[0].includes('DELETEME'), 'the deleted words are still in the file');
+  const clean = await b.evaluate(`(async () => {
+    const s = atob(${JSON.stringify(b64)}); const u = new Uint8Array(s.length);
+    for (let i = 0; i < s.length; i++) u[i] = s.charCodeAt(i);
+    const pdf = await pdfjsLib.getDocument({ data: u }).promise;
+    const p = await pdf.getPage(1); const vp = p.getViewport({ scale: 2 });
+    const c = document.createElement('canvas'); c.width = vp.width; c.height = vp.height;
+    const ctx = c.getContext('2d');
+    ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, c.width, c.height);
+    await p.render({ canvasContext: ctx, viewport: vp }).promise;
+    // the strip where the line used to be should be plain paper
+    const d = ctx.getImageData(50, 60, 300, 40).data;
+    let ink = 0; for (let i = 0; i < d.length; i += 4) if (d[i] < 200 || d[i+1] < 200) ink++;
+    return ink;
+  })()`);
+  ok(clean < 40, `the deleted area should be clean paper in the file, found ${clean} marked pixels`);
+});
+
 test('layers panel lists, hides, reorders and deletes marks', async b => {
   await b.reload();
   await b.evaluate(makeDoc(`doc.addPage([420, 300]).drawText('Base text', { x: 30, y: 250, size: 14, font: f });`));
