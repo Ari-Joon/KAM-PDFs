@@ -139,6 +139,13 @@ input[type=range]{accent-color:var(--accent)}
 #findBar input{width:220px}
 #findBar button{padding:3px 8px}
 #findCount{min-width:70px;text-align:center;white-space:nowrap}
+.layer{display:flex;align-items:center;gap:6px;padding:6px 4px;border-bottom:1px solid var(--border);cursor:pointer;border-radius:4px}
+.layer:hover{background:var(--btn)}
+.layer.on{background:var(--thumb-sel);outline:1px solid var(--accent)}
+.layer.off .layer-name{opacity:.45;text-decoration:line-through}
+.layer-dot{width:12px;height:12px;border-radius:3px;border:1px solid var(--border);flex:none}
+.layer-name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px}
+.layer-btn{padding:1px 5px;font-size:11px;line-height:1.5}
 .spell-list{max-height:52vh;overflow:auto;margin:4px 0 10px}
 .spell-item{display:flex;align-items:center;gap:10px;padding:9px 4px;border-bottom:1px solid var(--border);flex-wrap:wrap}
 .spell-item:last-child{border-bottom:none}
@@ -245,7 +252,8 @@ kbd{background:var(--kbd);border:1px solid var(--border);border-radius:4px;paddi
   <aside id="rightpanel">
     <div class="tabs">
       <button data-tab="doc" class="active">Document</button>
-      <button data-tab="form">Form fields</button>
+      <button data-tab="layers">Layers</button>
+      <button data-tab="form">Form</button>
       <button data-tab="help">Help</button>
     </div>
     <div class="tab active" id="tab-doc">
@@ -277,6 +285,10 @@ kbd{background:var(--kbd);border:1px solid var(--border);border-radius:4px;paddi
       <div class="field"><label>Keywords (comma separated)</label><input id="mKeywords"></div>
       <div class="row"><button id="btnMeta">Apply metadata</button></div>
     </div>
+    <div class="tab" id="tab-layers">
+      <div class="row"><span class="muted" style="flex:1">Everything you have added to this page, newest first.</span><button id="btnLayersClear">Clear page</button></div>
+      <div id="layerList"></div>
+    </div>
     <div class="tab" id="tab-form">
       <div id="formFields"><div class="muted">Open a PDF with form fields to fill them here.</div></div>
       <div class="row" id="formActions" style="display:none;margin-top:10px"><button id="btnApplyForm" class="primary">Apply values</button></div>
@@ -295,6 +307,8 @@ kbd{background:var(--kbd);border:1px solid var(--border);border-radius:4px;paddi
       <div class="muted" style="line-height:1.6">
         <b>Text:</b> click to place free text, or drag out a box first and the text wraps to that width. Drag the corner square to change the width. Double-click to edit. Paste an image from the clipboard with Ctrl+V.<br><br>
         Annotations are drawn on top of the page when you save. Whiteout only covers content visually; the underlying text stays in the file.<br><br>
+        <b>Layers:</b> the Layers tab lists everything you have added to the page, newest first. Click one to select it, hide it with ◉, move it forward or back with ▲▼, or delete it. Useful once marks start overlapping.<br><br>
+        <b>Typing over a cover:</b> double-click anywhere, including inside a whiteout, and you get a text box there.<br><br>
         <b>Redact:</b> the ⬛ Redact tool removes what is underneath. When you save, that page is rebuilt from a picture of itself, so the hidden words are not in the file at all. Whiteout only covers text; anyone can still extract it.<br><br>
         <b>Select and copy:</b> drag across text already in the PDF to select it, then Ctrl+C. A single click picks a line so Delete can remove it.<br><br>
         <b>Scanned pages:</b> "Read this page" under Scanned pages finds the words in a scan and adds them to the saved PDF as an invisible layer, so it becomes searchable. It runs on your computer.<br><br>
@@ -328,6 +342,7 @@ kbd{background:var(--kbd);border:1px solid var(--border);border-radius:4px;paddi
 <script src="pdftext-ui.js"></script>
 <script src="ocr.js"></script>
 <script src="ocr-ui.js"></script>
+<script src="layers.js"></script>
 <script src="scan-desktop.js"></script>
 <script>
 if ("serviceWorker" in navigator && location.protocol.startsWith("http")) {

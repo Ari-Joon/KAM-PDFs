@@ -210,6 +210,7 @@ async function goTo(i) {
   state.cur = i; state.selected = null;
   updatePager(); updateThumbClasses(); updateProps();
   const t = $(`.thumb[data-i="${i}"]`); if (t) t.scrollIntoView({ block: 'nearest' });
+  if (typeof refreshLayers === 'function') refreshLayers(true);
   await renderPage();
 }
 function setZoom(z, fit = '') {

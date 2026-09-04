@@ -65,6 +65,11 @@ Unzip and open `index.html` in Chrome, Edge, Firefox, or Safari. Everything work
 - Drag across text to select it and Ctrl+C to copy; click a line and press Delete to remove it
 - Find (Ctrl+F) searches the whole document and steps through matches
 
+**Layers**
+- Every mark you add is listed in the Layers tab, newest first: select, hide, reorder or delete any of them
+- Marks pile up quickly when you cover and retype things, and the list is how you reach the one underneath
+- Double-click anywhere, including inside a whiteout, to type there
+
 **Redact and scan**
 - Redact permanently removes what is underneath: that page is rebuilt from a picture of itself, so the hidden words are not in the saved file at all
 - OCR reads the words off a scanned page and adds them to the saved PDF as an invisible layer, so the scan becomes searchable. It runs on your computer, like everything else
@@ -125,6 +130,10 @@ Unzip and open `index.html` in Chrome, Edge, Firefox, or Safari. Everything work
 
 <img src="screenshots/scan-phone.png" width="360" alt="Phone scanner page">
 
+**Layers.** Everything you have added to the page, newest first. Select, hide, reorder or delete any of it.
+
+![Layers panel](screenshots/layers.png)
+
 **Light mode.** One click on the ☀ button, remembered between sessions.
 
 ![Light mode](screenshots/light.png)
@@ -154,6 +163,7 @@ Phone scanner page: https://ari-joon.github.io/KAM-PDFs/scan.html
 | Arrow keys | Nudge the selected annotation (Shift for 10x) |
 | `Ctrl+F` | Find in document (Enter / Shift+Enter to step) |
 | `X` | Redact tool |
+| Double-click | Type here, or edit the text under the cursor |
 | `Ctrl+C` | Copy selected page text |
 | Double-click | Edit a line of existing text, or a text box you added |
 | `Ctrl+S` / `Ctrl+P` | Save PDF / print |
@@ -177,6 +187,7 @@ pdftext.js              index of the PDF's own text: positions, lines, search
 pdftext-ui.js           edit, select, delete existing text, and the Find bar
 ocr.js                  reading text off a scan (Tesseract, bundled)
 ocr-ui.js               the OCR buttons and the invisible text layer
+layers.js               the Layers panel
 tests/run.js            the test suite: node tests/run.js
 spell.js                dictionary loading, checking and suggestions
 spell-ui.js             underlines and the spelling review dialog
@@ -204,7 +215,7 @@ Install KAM PDFs.bat    double-click installer (Windows)
 node tests/run.js
 ```
 
-Twelve tests covering page operations, annotation fidelity, form fields, text editing,
+Fourteen tests covering page operations, annotation fidelity, form fields, text editing,
 selection, find, spell checking, redaction, OCR, undo and the scanner. Needs Node 18+ and
 Chrome; nothing to install. See [tests/README.md](tests/README.md) for what each one checks
 and why one of them deliberately uses a second rendering engine.

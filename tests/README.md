@@ -28,6 +28,8 @@ anything fails, so it works as a pre-commit or CI check.
 | spell checking | real mistakes flagged, correct words and acronyms left alone, suggestion ranking |
 | redaction | the removed words are absent from the file, including inside compressed streams |
 | OCR | a scan gains searchable text, in the right reading order |
+| layers panel | marks are listed, hidden, reordered and deleted; hidden ones stay out of the file |
+| covers | double-clicking inside a whiteout still gives you somewhere to type |
 | undo and redo | changes step backwards and forwards |
 | scanner | page corners found in a photograph |
 

@@ -56,7 +56,7 @@ function arrowHead(a) {
 /* ---------- drawing ---------- */
 function drawAnnots(ctx, pageId, s, selected, opts) {
   const spell = !opts || opts.spell !== false;
-  for (const a of (state.annots[pageId] || [])) { if (!a._editing) drawAnnot(ctx, a, s, spell); }
+  for (const a of (state.annots[pageId] || [])) { if (!a._editing && !a.hidden) drawAnnot(ctx, a, s, spell); }
   if (selected) drawSelection(ctx, selected, s);
 }
 /* Red dotted underline beneath misspelled words. Screen only: it is never exported. */
@@ -135,6 +135,7 @@ function drawOverlay() {
   const s = state.zoom * (window.devicePixelRatio || 1);
   if (typeof drawPdfTextLayer === 'function') drawPdfTextLayer(ctx, s);
   drawAnnots(ctx, curPageId(), s, state.selected);
+  if (typeof refreshLayers === 'function') refreshLayers();
   if (drag && drag.mode === 'textbox') {
     const dpr = window.devicePixelRatio || 1, [sx, sy] = drag.start, [cx, cy] = drag.cur;
     ctx.save(); ctx.strokeStyle = '#f5b400'; ctx.lineWidth = dpr; ctx.setLineDash([4 * dpr, 3 * dpr]);
@@ -168,9 +169,23 @@ function hitHandle(a, mx, my) {
   const [lx, ly] = localPt(a, mx, my), hs = 7 / state.zoom;
   return Math.abs(lx - a.w) < hs && Math.abs(ly - a.h) < hs;
 }
-function hitTest(mx, my) {
+function hitTest(mx, my, wanted) {
   const list = curAnnots();
-  for (let i = list.length - 1; i >= 0; i--) if (hitAnnot(list[i], mx, my)) return list[i];
+  for (let i = list.length - 1; i >= 0; i--) {
+    const a = list[i];
+    if (a.hidden || (wanted && a.type !== wanted)) continue;
+    if (hitAnnot(a, mx, my)) return a;
+  }
+  return null;
+}
+/* An opaque mark of ours sitting over this point, e.g. a whiteout or a redaction. */
+function coverAt(mx, my) {
+  const list = curAnnots();
+  for (let i = list.length - 1; i >= 0; i--) {
+    const a = list[i];
+    if (a.hidden || a.pts || a.type !== 'rect' || !a.fill || a.blend) continue;
+    if ((a.opacity == null ? 1 : a.opacity) > 0.85 && hitAnnot(a, mx, my)) return a;
+  }
   return null;
 }
 
@@ -349,12 +364,19 @@ function endDrag(e) {
 }
 overlay.addEventListener('pointerup', endDrag);
 overlay.addEventListener('pointercancel', endDrag);
-overlay.addEventListener('dblclick', e => {
+/* Double-click should always give you somewhere to type. In order: a text box of yours, then
+   the PDF's own text, then a fresh text box. Without the last step a whiteout swallowed the
+   double-click and there was no way to write in the space you had just cleared. */
+overlay.addEventListener('dblclick', async e => {
   if (state.tool !== 'select') return;
-  const [x, y] = evtPt(e); const a = hitTest(x, y);
-  if (a && a.type === 'text') { startTextEdit(a); return; }
-  // nothing of ours under the cursor: try the text that is already in the PDF
-  if (!a && typeof pdfTextEditAt === 'function') pdfTextEditAt(x, y);
+  const [x, y] = evtPt(e);
+  const mine = hitTest(x, y, 'text');
+  if (mine) { startTextEdit(mine); return; }
+  if (!coverAt(x, y) && typeof pdfTextEditAt === 'function' && await pdfTextEditAt(x, y)) return;
+  pushAnnotUndo(curPageId());
+  const a = { id: uid(), type: 'text', x, y: y - defaults.size * 0.6, w: 0, h: 0, rot: 0, text: '',
+              size: defaults.size, font: defaults.font, bold: defaults.bold, color: defaults.color, opacity: defaults.opacity };
+  measureText(a); curAnnots().push(a); drawOverlay(); startTextEdit(a);
 });
 
 /* ---------- inline text editing ---------- */

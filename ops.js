@@ -299,7 +299,7 @@ function annotBox(a) {
    When that happens the fields have to be flattened into the page first. */
 async function annotsCoverAFormField() {
   for (let i = 0; i < state.pageIds.length; i++) {
-    const list = (state.annots[state.pageIds[i]] || []).filter(a => !(a.type === 'text' && !a.text.trim()));
+    const list = (state.annots[state.pageIds[i]] || []).filter(a => !a.hidden && !(a.type === 'text' && !a.text.trim()));
     if (!list.length) continue;
     let page, widgets;
     try {
@@ -348,7 +348,7 @@ async function burnedDoc() {
   const doc = await PDFDocument.load(state.bytes, { ignoreEncryption: true, updateMetadata: false });
   const redacted = [];
   for (let i = 0; i < state.pageIds.length; i++)
-    if ((state.annots[state.pageIds[i]] || []).some(a => a.redact)) redacted.push(i);
+    if ((state.annots[state.pageIds[i]] || []).some(a => a.redact && !a.hidden)) redacted.push(i);
   const fieldCount = (() => { try { return doc.getForm().getFields().length; } catch (e) { return 0; } })();
   // Must happen before anything of ours is drawn, so our marks end up on top.
   if ($('#flattenForm').checked || (fieldCount && redacted.length) || await annotsCoverAFormField()) {
@@ -385,7 +385,7 @@ async function burnedDoc() {
 
   for (let i = 0; i < state.pageIds.length; i++) {
     if (redacted.includes(i)) continue;                 // rebuilt from a bitmap further down
-    const list = (state.annots[state.pageIds[i]] || []).filter(a => !(a.type === 'text' && !a.text.trim()));
+    const list = (state.annots[state.pageIds[i]] || []).filter(a => !a.hidden && !(a.type === 'text' && !a.text.trim()));
     const ocrWords = (typeof ocrWordsFor === 'function' ? ocrWordsFor(i) : []) || [];
     if (!list.length && !ocrWords.length) continue;
     const page = doc.getPage(i);

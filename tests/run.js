@@ -443,6 +443,65 @@ test('OCR makes a scanned page searchable', async b => {
   ok(/Northwind/i.test(pages[0]), `saved scan is not searchable: ${JSON.stringify(pages[0])}`);
 });
 
+test('layers panel lists, hides, reorders and deletes marks', async b => {
+  await b.reload();
+  await b.evaluate(makeDoc(`doc.addPage([420, 300]).drawText('Base text', { x: 30, y: 250, size: 14, font: f });`));
+  await b.waitFor(settled);
+  await b.evaluate(`(() => { const id = state.pageIds[0]; state.annots[id] = [
+      { id: uid(), type:'rect', x:25, y:36, w:200, h:24, rot:0, stroke:null, fill:'#ffffff', width:0, opacity:1 },
+      Object.assign({ id: uid(), type:'text', x:30, y:40, w:0, h:0, rot:0, text:'On top', size:14, font:'Helvetica', bold:false, color:'#000000', opacity:1 }, {}),
+    ]; measureText(state.annots[id][1]); drawOverlay(); refreshLayers(true); return 1; })()`);
+
+  // newest first, matching what sits on top of the page
+  eq(await b.evaluate(`[...document.querySelectorAll('#layerList .layer .layer-name b')].map(e => e.textContent)`),
+    ['Text', 'Cover'], 'layers listed newest first');
+
+  // hiding a layer takes it off the page and out of the saved file
+  await b.evaluate(`[...document.querySelectorAll('#layerList .layer')][0].querySelector('[data-act="eye"]').click()`);
+  eq(await b.evaluate(`curAnnots().filter(a => a.hidden).length`), 1, 'layer marked hidden');
+  let b64 = await b.evaluate(exportBase64);
+  let pages = await b.evaluate(textOf(b64));
+  ok(!pages[0].includes('On top'), 'a hidden layer should not be saved');
+
+  // unhide, then send it to the back
+  await b.evaluate(`[...document.querySelectorAll('#layerList .layer')][0].querySelector('[data-act="eye"]').click()`);
+  eq(await b.evaluate(`curAnnots().filter(a => a.hidden).length`), 0, 'layer shown again');
+  await b.evaluate(`[...document.querySelectorAll('#layerList .layer')][0].querySelector('[data-act="down"]').click()`);
+  eq(await b.evaluate(`curAnnots().map(a => a.type)`), ['text', 'rect'], 'layer sent behind the cover');
+  b64 = await b.evaluate(exportBase64);
+  pages = await b.evaluate(textOf(b64));
+  ok(pages[0].includes('On top'), 'a visible layer should be saved again');
+
+  // delete it
+  await b.evaluate(`[...document.querySelectorAll('#layerList .layer')].find(r => r.textContent.includes('Text')).querySelector('[data-act="del"]').click()`);
+  eq(await b.evaluate(`curAnnots().length`), 1, 'layer deleted');
+  await b.evaluate(`undo()`);
+  eq(await b.evaluate(`curAnnots().length`), 2, 'undo brings a deleted layer back');
+});
+
+test('a cover does not block typing over it', async b => {
+  await b.reload();
+  await b.evaluate(makeDoc(`doc.addPage([420, 300]).drawText('Original line here', { x: 30, y: 250, size: 14, font: f });`));
+  await b.waitFor(settled);
+  await b.evaluate(`(() => { const id = state.pageIds[0]; state.annots[id] = [
+    { id: uid(), type:'rect', x:25, y:36, w:230, h:24, rot:0, stroke:null, fill:'#ffffff', width:0, opacity:1 }];
+    drawOverlay(); setTool('select'); return 1; })()`);
+
+  // double-clicking inside the whiteout must give somewhere to type, not be swallowed
+  await b.evaluate(`(() => {
+    const ov = document.getElementById('overlay'), rc = ov.getBoundingClientRect(), z = state.zoom;
+    ov.dispatchEvent(new MouseEvent('dblclick', { clientX: rc.left + 200*z, clientY: rc.top + 46*z, bubbles: true }));
+    return 1; })()`);
+  await b.waitFor(`!!editing`, 5000);
+  await b.evaluate(`(() => { const t = document.getElementById('textEditor'); t.value = 'TYPED OVER'; t.dispatchEvent(new Event('input')); commitTextEdit(); return 1; })()`);
+
+  const order = await b.evaluate(`curAnnots().map(a => a.type)`);
+  eq(order, ['rect', 'text'], 'new text should sit above the cover');
+  const b64 = await b.evaluate(exportBase64);
+  const pages = await b.evaluate(textOf(b64));
+  ok(pages[0].includes('TYPED OVER'), 'text typed over a cover is missing from the saved file');
+});
+
 test('undo and redo step through changes', async b => {
   await b.reload();
   await b.evaluate(makeDoc(`doc.addPage([420, 300]).drawText('Base', { x: 30, y: 250, size: 14, font: f });`));
