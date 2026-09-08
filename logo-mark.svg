@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+<title>KAM PDFs</title>
+<rect width="512" height="512" rx="112" fill="#000000"/>
+<g fill="none" stroke="#3b82f6" stroke-width="50" stroke-linecap="round" stroke-linejoin="round">
+<path d="M60 152V60h92"/>
+<path d="M360 60h92v92"/>
+<path d="M452 360v92h-92"/>
+<path d="M152 452H60v-92"/>
+</g>
+<path d="M150 140a10 10 0 0 1 10-10h132l70 70v172a10 10 0 0 1-10 10H160a10 10 0 0 1-10-10z" fill="#ffffff"/>
+<path d="M292 130l70 70h-60a10 10 0 0 1-10-10z" fill="#c9ccd2"/>
+<rect x="118" y="236" width="276" height="80" rx="14" fill="#f5b400"/>
+</svg>

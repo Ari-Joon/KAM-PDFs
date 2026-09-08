@@ -5,7 +5,7 @@ pdfjsLib.GlobalWorkerOptions.workerSrc = 'lib/pdf.worker.min.js';
 
 /* Bumped with each release, and shown in the Help tab. Because it lives in the code that
    is actually running, it tells you which version you have rather than which is newest. */
-const KAM_VERSION = '1.13.0';
+const KAM_VERSION = '1.14.0';
 
 const $ = s => document.querySelector(s);
 const $$ = s => [...document.querySelectorAll(s)];
@@ -404,7 +404,7 @@ document.addEventListener('visibilitychange', () => { if (!document.hidden) mayb
 /* ---------- light / dark theme ---------- */
 function applyTheme(t) {
   document.documentElement.setAttribute('data-theme', t);
-  $('#btnTheme').textContent = t === 'light' ? '🌙' : '☀';
+  // which icon shows is decided in CSS from data-theme, so the drawn icon is not clobbered
   $('#btnTheme').title = t === 'light' ? 'Switch to dark mode' : 'Switch to light mode';
   const meta = document.querySelector('meta[name=theme-color]'); if (meta) meta.content = t === 'light' ? '#ffffff' : '#1e1f24';
   try { localStorage.setItem('kam-theme', t); } catch (e) { }

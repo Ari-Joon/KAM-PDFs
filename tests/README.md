@@ -39,6 +39,9 @@ anything fails, so it works as a pre-commit or CI check.
 | the update check | a newer version raises the green bar, "Not now" is remembered for that version only, and GitHub answers when the site's own file cannot |
 | updating | the offline copy is cleared and the app restarts, so the reload really gets the new files |
 | the version number | core.js, version.json and the service worker cache name all agree |
+| movable panels | a dragged divider actually moves the panel, collapses it, restores it, answers the keyboard, and is remembered across a reload |
+| the tool row | dragging its grip into the lower half moves the tools below the page, and that survives a reload |
+| the icon set | no button is left carrying an emoji, every icon a button asks for exists, and they render with a real size and the button's colour |
 
 ## Why a second engine
 
@@ -67,6 +70,10 @@ Without them that one assertion is skipped and reported as skipped, not silently
 - The update tests assert that the bar is actually on screen (it has a size, and is not
   `display:none`), not merely that the `hidden` flag was cleared. Checking the flag would be
   grading the line of code that sets it.
+- The panel test measures the panel, not the number that was stored. An early version of the
+  feature wrote the new width to storage while the panel stayed exactly where it was, because
+  a flex child was being sized from two places at once; a test that checked the stored value
+  would have passed the whole time.
 - The version test is the one that stops a release going out silently: if `version.json` is not
   bumped alongside `core.js`, nobody already running the app is ever told the release exists.
 - The restore test waits for the marks to come back, not just for the document to open: the

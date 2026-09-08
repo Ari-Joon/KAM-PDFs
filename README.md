@@ -106,6 +106,12 @@ Unzip and open `index.html` in Chrome, Edge, Firefox, or Safari. Everything work
 - Light and dark mode (the ☀ / 🌙 button, remembered between sessions)
 - A working copy is kept on your computer as you go, so a crash or a closed window does not cost you the afternoon. Reopen the app and it offers your last session back. Nothing is uploaded, and Forget removes it
 
+**The window is yours to arrange**
+- Drag the divider on either side of the page to resize the Pages and Document panels; drag one well past its minimum and the panel folds away, so the page gets the whole window
+- Double-click a divider to put it back, or use the arrow keys once it has focus, so it works without a mouse
+- Drag the dotted grip on the tool row to move the tools below the page instead of above it
+- Whatever you set is remembered on this computer. **Reset layout** in the Document tab puts it all back
+
 **Staying up to date**
 - If you're online, KAM PDFs checks whether a newer version exists and tells you in a green bar under the tools. It checks at most once every six hours, and never sends anything about you or your file
 - **Update now** in that bar does it there and then: the app fetches the new version and restarts itself. Anything open is kept in the working copy first, so you don't lose it
@@ -142,9 +148,9 @@ Unzip and open `index.html` in Chrome, Edge, Firefox, or Safari. Everything work
 
 <img src="screenshots/scan-phone.png" width="360" alt="Phone scanner page">
 
-**Layers.** Everything you have added to the page, newest first. Select, hide, reorder or delete any of it.
+**Layers, and a window arranged to suit.** Everything you have added to the page is listed newest first: select, hide, drag to restack, or delete any of it. The dividers either side of the page can be dragged to any width, and the tool row can sit below the page instead of above it.
 
-![Layers panel](screenshots/layers.png)
+![Layers panel and resizable panels](screenshots/layout.png)
 
 **Light mode.** One click on the ☀ button, remembered between sessions.
 
@@ -200,6 +206,9 @@ ocr.js                  reading text off a scan (Tesseract, bundled)
 ocr-ui.js               the OCR buttons and the invisible text layer
 layers.js               the Layers panel
 autosave.js             the working copy kept in this browser's storage
+panels.js               dividers you can drag, and the tool row's position
+logo-mark.svg           the logo with the wordmark dropped, for small sizes
+setup/build-icons.js    redraws every icon and the .ico from the two SVGs
 version.json            the version this site is serving, which is how installed copies
                         learn that a newer one exists
 tests/run.js            the test suite: node tests/run.js
@@ -229,9 +238,9 @@ Install KAM PDFs.bat    double-click installer (Windows)
 node tests/run.js
 ```
 
-Twenty-two tests covering page operations, annotation fidelity, form fields, text editing,
+Twenty-five tests covering page operations, annotation fidelity, form fields, text editing,
 selection, find, spell checking, redaction, OCR, layers, the working copy, undo and the
-scanner, and the update check. Needs Node 18+ and
+scanner, the movable panels, the icon set and the update check. Needs Node 18+ and
 Chrome; nothing to install. See [tests/README.md](tests/README.md) for what each one checks
 and why one of them deliberately uses a second rendering engine.
 

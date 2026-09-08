@@ -802,6 +802,135 @@ test('updating clears the offline copy and reloads', async b => {
   eq(await b.evaluate(barShows), false, 'and the bar is not left over after the reload');
 });
 
+test('the side panels can be dragged, collapsed and put back', async b => {
+  await b.reload();
+  await b.evaluate(makeDoc(`doc.addPage([420, 300]);`));
+  await b.waitFor(settled);
+  await b.evaluate(`(() => { try { localStorage.removeItem('kam-w-sidebar'); localStorage.removeItem('kam-w-rightpanel'); } catch (e) {}
+    KamPanels.set('sidebar', 200, false); KamPanels.set('rightpanel', 270, false); return 1; })()`);
+
+  // drag a divider the way a mouse would, and check the panel really moved rather than just
+  // the number that was stored
+  const dragSplit = (which, dx) => `(() => {
+    const sp = document.getElementById('split-' + '${which}');
+    sp.setPointerCapture = () => {}; sp.releasePointerCapture = () => {};
+    const r = sp.getBoundingClientRect(), y = r.top + 30, x = r.left + 3;
+    const P = (t, px) => new PointerEvent(t, { clientX: px, clientY: y, button: 0, bubbles: true, pointerId: 7 });
+    sp.dispatchEvent(P('pointerdown', x));
+    sp.dispatchEvent(P('pointermove', x + ${dx}));
+    sp.dispatchEvent(P('pointerup', x + ${dx}));
+    return 1; })()`;
+  const widthOf = name => b.evaluate(`document.getElementById('${name}').offsetWidth`);
+
+  await b.evaluate(dragSplit('sidebar', 120));
+  await b.waitFor(`document.getElementById('sidebar').offsetWidth > 300`, 4000);
+  const wideSide = await widthOf('sidebar');
+  near(wideSide, 320, 6, 'the pages panel followed the divider');
+  eq(await b.evaluate(`localStorage.getItem('kam-w-sidebar')`), String(wideSide), 'and the width was remembered');
+
+  // the right panel grows when its divider goes the other way
+  await b.evaluate(dragSplit('rightpanel', -70));
+  await b.waitFor(`document.getElementById('rightpanel').offsetWidth > 320`, 4000);
+  near(await widthOf('rightpanel'), 340, 6, 'the document panel followed its divider');
+
+  // dragged well past the minimum, a panel folds away instead of jamming
+  await b.evaluate(dragSplit('sidebar', -400));
+  await b.waitFor(`document.getElementById('sidebar').offsetWidth === 0`, 4000);
+  eq(await b.evaluate(`localStorage.getItem('kam-w-sidebar')`), 'collapsed', 'the collapse was remembered');
+  eq(await b.evaluate(`!!document.getElementById('split-sidebar').classList.contains('collapsed')`), true,
+    'the divider shows there is something folded away');
+
+  // double-clicking a collapsed divider brings the panel back
+  await b.evaluate(`document.getElementById('split-sidebar').dispatchEvent(new MouseEvent('dblclick', { bubbles: true }))`);
+  await b.waitFor(`document.getElementById('sidebar').offsetWidth > 100`, 4000);
+  ok(await widthOf('sidebar') > 100, 'double-click brought the panel back');
+
+  // and on a normal divider it resets to the width it shipped with
+  await b.evaluate(dragSplit('sidebar', 90));
+  await b.evaluate(`document.getElementById('split-sidebar').dispatchEvent(new MouseEvent('dblclick', { bubbles: true }))`);
+  await b.waitFor(`document.getElementById('sidebar').offsetWidth === 200`, 4000);
+  eq(await widthOf('sidebar'), 200, 'double-click resets to the default width');
+
+  // the keyboard can do all of it too, because a drag-only divider excludes people
+  await b.evaluate(`document.getElementById('split-rightpanel').dispatchEvent(new KeyboardEvent('keydown', { key: 'Home', bubbles: true }))`);
+  await b.waitFor(`document.getElementById('rightpanel').offsetWidth === 270`, 4000);
+  await b.evaluate(`document.getElementById('split-rightpanel').dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true }))`);
+  await b.waitFor(`document.getElementById('rightpanel').offsetWidth === 286`, 4000);
+  eq(await widthOf('rightpanel'), 286, 'an arrow key widens the panel by one step');
+
+  // sizes survive the window closing
+  await b.evaluate(`KamPanels.set('sidebar', 300, false)`);
+  await b.reload();
+  await b.waitFor(`document.getElementById('sidebar').offsetWidth === 300`, 5000);
+  eq(await widthOf('sidebar'), 300, 'the width came back after a reload');
+  await b.evaluate(`KamPanels.reset()`);
+});
+
+test('the tool row can be moved below the page', async b => {
+  await b.reload();
+  await b.evaluate(makeDoc(`doc.addPage([420, 300]);`));
+  await b.waitFor(settled);
+  await b.evaluate(`try { localStorage.removeItem('kam-toolbar-dock'); } catch (e) {} KamPanels.setDock('top'); 1`);
+
+  const order = `(() => {
+    const t = document.getElementById('toolbar'), v = document.getElementById('viewport');
+    return t.getBoundingClientRect().top < v.getBoundingClientRect().top ? 'above' : 'below';
+  })()`;
+  eq(await b.evaluate(order), 'above', 'the tools start above the page');
+
+  // drag the grip into the lower half of the viewer
+  await b.evaluate(`(() => {
+    const g = document.getElementById('toolbarGrip'), v = document.getElementById('viewer');
+    g.setPointerCapture = () => {}; g.releasePointerCapture = () => {};
+    const r = v.getBoundingClientRect(), gr = g.getBoundingClientRect();
+    const P = (t, y) => new PointerEvent(t, { clientX: gr.left + 5, clientY: y, button: 0, bubbles: true, pointerId: 8 });
+    g.dispatchEvent(P('pointerdown', gr.top + 5));
+    g.dispatchEvent(P('pointermove', r.top + r.height * 0.8));
+    g.dispatchEvent(P('pointerup', r.top + r.height * 0.8));
+    return 1; })()`);
+  await b.waitFor(`${order} === 'below'`, 4000);
+  eq(await b.evaluate(order), 'below', 'the tools moved under the page');
+  eq(await b.evaluate(`localStorage.getItem('kam-toolbar-dock')`), 'bottom', 'and that was remembered');
+
+  await b.reload();
+  await b.waitFor(settled + ` || true`);
+  eq(await b.evaluate(order), 'below', 'still below after a reload');
+  await b.evaluate(`KamPanels.reset()`);
+  eq(await b.evaluate(order), 'above', 'Reset layout puts everything back');
+});
+
+test('the buttons use the drawn icon set, not emoji', async b => {
+  const html = fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8');
+
+  // Emoji arrive at a different size, weight and colour on every machine, and some of them
+  // in full colour, which is what made the tool row look thrown together.
+  const emoji = /[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{2B00}-\u{2BFF}\u{FE0F}]/u;
+  const offenders = [];
+  for (const m of html.matchAll(/<button[\s\S]*?<\/button>/g)) {
+    const label = m[0].replace(/<svg[\s\S]*?<\/svg>/g, '').replace(/<[^>]+>/g, '');
+    if (emoji.test(label)) offenders.push(label.trim().slice(0, 30));
+  }
+  eq(offenders, [], 'these buttons still carry an emoji');
+
+  // every icon a button asks for has to exist, or it renders as nothing at all
+  const defined = new Set([...html.matchAll(/<symbol id="(i-[\w-]+)"/g)].map(x => x[1]));
+  const used = [...new Set([...html.matchAll(/<use href="#(i-[\w-]+)"/g)].map(x => x[1]))];
+  eq(used.filter(u => !defined.has(u)), [], 'icons used but never drawn');
+  ok(used.length >= 20, `expected a full icon set, found ${used.length}`);
+
+  // and they should actually paint: an icon with no size is an icon nobody sees
+  await b.reload();
+  const box = JSON.parse(await b.evaluate(`(() => {
+    const ics = [...document.querySelectorAll('#tools .ic')];
+    const bad = ics.filter(i => i.getBoundingClientRect().width < 8 || i.getBoundingClientRect().height < 8);
+    return JSON.stringify({ count: ics.length, bad: bad.length,
+      stroke: ics.length ? getComputedStyle(ics[0]).stroke : '' });
+  })()`));
+  ok(box.count >= 10, `expected icons in the tool row, found ${box.count}`);
+  eq(box.bad, 0, 'some tool icons render with no size');
+  ok(box.stroke && box.stroke !== 'none', 'tool icons should take the button colour');
+});
+
 test('the released version number is stated in one place only', async () => {
   const core = fs.readFileSync(path.join(ROOT, 'core.js'), 'utf8');
   const app = (core.match(/KAM_VERSION\s*=\s*'([^']+)'/) || [])[1];
