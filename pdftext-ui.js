@@ -244,8 +244,8 @@
   const bar = document.createElement('div'); bar.id = 'findBar'; bar.hidden = true;
   bar.innerHTML = `<input id="findInput" type="search" placeholder="Find in document" autocomplete="off" spellcheck="false">
     <span id="findCount" class="muted"></span>
-    <button id="findPrev" title="Previous match (Shift+Enter)">▲</button><button id="findNext" title="Next match (Enter)">▼</button>
-    <button id="findClose" title="Close (Esc)">✕</button>`;
+    <button id="findPrev" title="Previous match (Shift+Enter)" aria-label="Previous match"><svg class="ic" aria-hidden="true"><use href="#i-up"/></svg></button><button id="findNext" title="Next match (Enter)" aria-label="Next match"><svg class="ic" aria-hidden="true"><use href="#i-down"/></svg></button>
+    <button id="findClose" title="Close (Esc)" aria-label="Close"><svg class="ic" aria-hidden="true"><use href="#i-close"/></svg></button>`;
   $('#viewer').appendChild(bar);
   const input = $('#findInput');
 

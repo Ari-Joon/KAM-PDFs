@@ -362,6 +362,44 @@ test('find locates text across pages', async b => {
   eq(await b.evaluate(`KamPdfText.search('NOTHINGHERE').then(m => m.length)`), 0, 'unknown text should find nothing');
 });
 
+test('a search highlight sits on the word it found, in a proportional font', async b => {
+  await b.reload();
+  // one drawText per line, so pdf.js reports each line as a single item with a single width
+  await b.evaluate(makeDoc(`
+    const p = doc.addPage([595, 842]);
+    p.drawText('The SpongeBob SquarePants Movie (2004)', { x: 48, y: 700, size: 20, font: fb });
+    p.drawText('Wide Ws and thin ils: WWWWWW iiiiii WWWWWW', { x: 48, y: 640, size: 14, font: f });
+    window.__fonts = { fb, f };`));
+  await b.waitFor(settled);
+
+  // pdf-lib knows the exact glyph widths of the standard fonts, so it is the answer key
+  const r = JSON.parse(await b.evaluate(`(async () => {
+    await KamPdfText.index(0);
+    const out = [];
+    for (const [q, font, size] of [['Bob', 'fb', 20], ['(2004)', 'fb', 20], ['iiiiii', 'f', 14], ['WWWWWW', 'f', 14]]) {
+      const m = (await KamPdfText.search(q))[0];
+      const run = m.run, fnt = window.__fonts[font];
+      const want0 = fnt.widthOfTextAtSize(run.text.slice(0, m.start), size);
+      const want1 = fnt.widthOfTextAtSize(run.text.slice(0, m.end), size);
+      // what the old even-spacing guess gave, so the test can show it would have caught that
+      const span = run.u1 - run.u0, even = m.start / run.text.length * span;
+      out.push({ q, size, start: KamPdfText.uAt(run, m.start) - run.u0, want0, end: KamPdfText.uAt(run, m.end) - run.u0, want1, even });
+    }
+    return JSON.stringify(out); })()`));
+  // The app measures in whichever sans or serif face the computer has, scaled to pdf.js's line
+  // width, while the PDF uses the real Helvetica. Close, not identical, so the allowance is a
+  // fraction of the type size: the highlight must sit on the word, not to a hundredth of a point.
+  for (const m of r) {
+    near(m.start, m.want0, 0.15 * m.size, `highlight for "${m.q}" starts on the word`);
+    near(m.end, m.want1, 0.15 * m.size, `highlight for "${m.q}" ends on the word`);
+  }
+  // and the probe is one the old code fails: spacing characters evenly misses by more than the
+  // allowance above, so this test would have caught the bug it exists for
+  const probe = r.find(m => m.q === 'iiiiii');
+  ok(Math.abs(probe.even - probe.want0) > 0.15 * probe.size,
+    `even spacing should miss "iiiiii" by more than the allowance, missed by ${Math.abs(probe.even - probe.want0).toFixed(1)}pt`);
+});
+
 test('spell checking flags real mistakes only', async b => {
   await b.reload();
   ok(await b.evaluate(`KamSpell.load()`), 'dictionary failed to load');
@@ -916,9 +954,13 @@ test('the buttons use the drawn icon set, not emoji', async b => {
     if (emoji.test(label)) offenders.push(label.trim().slice(0, 30));
   }
   eq(offenders, [], 'these buttons still carry an emoji');
-  const layersJs = fs.readFileSync(path.join(ROOT, 'layers.js'), 'utf8');
-  eq((layersJs.match(emoji) || [null])[0], null, 'the Layers rows still draw an emoji');
-  ok(!/[\u25B2\u25BC\u25C9\u25CC]/u.test(layersJs), 'the Layers rows still use triangle or circle glyphs');
+  // Nowhere else draws one either. The Layers rows, the find bar, the scan dialog and the
+  // signature box all still did after the toolbar was fixed; it took screenshots to notice.
+  for (const f of ['layers.js', 'annot.js', 'pdftext-ui.js', 'scan-desktop.js', 'scan-ui.js', 'scan.html']) {
+    const src = fs.readFileSync(path.join(ROOT, f), 'utf8');
+    const hit = src.match(emoji) || src.match(/[\u25B2\u25BC\u25B8\u25C2\u25C9\u25CC\u27F2\u27F3]/u);
+    eq(hit ? hit[0] : null, null, `${f} still draws an emoji or symbol glyph`);
+  }
 
   // every icon a button asks for has to exist, or it renders as nothing at all
   const defined = new Set([...html.matchAll(/<symbol id="(i-[\w-]+)"/g)].map(x => x[1]));

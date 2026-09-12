@@ -505,7 +505,7 @@ $('#btnSign').onclick = () => {
   const saved = savedSignatures();
   const gallery = saved.length
     ? `<div class="muted" style="margin-bottom:6px">Your saved signatures. Click one to place it.</div>
-       <div class="sig-saved">${saved.map((s, i) => `<div class="sig-card"><img src="${s}" data-i="${i}" alt="saved signature"><button class="sig-del" data-i="${i}" title="Forget this signature">✕</button></div>`).join('')}</div>`
+       <div class="sig-saved">${saved.map((s, i) => `<div class="sig-card"><img src="${s}" data-i="${i}" alt="saved signature"><button class="sig-del" data-i="${i}" title="Forget this signature" aria-label="Forget this signature"><svg class="ic" aria-hidden="true"><use href="#i-close"/></svg></button></div>`).join('')}</div>`
     : '';
   showModal(`<h3>Signature</h3>${gallery}
     <div class="muted" style="margin-bottom:6px">${saved.length ? 'Or draw a new one:' : 'Draw your signature:'}</div>

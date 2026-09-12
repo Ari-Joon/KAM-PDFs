@@ -105,10 +105,31 @@ const KamPdfText = (() => {
     }
     return best;
   }
-  // position along the baseline of a character offset, using per-item widths
+  /* Where a character sits inside one pdf.js item. pdf.js gives the width of the whole item,
+     not of each glyph, and a whole line is often a single item. Spreading the characters
+     evenly put a search highlight on "SpongeBo" instead of "SpongeBob", because an "i" and a
+     "W" are not the same width. So measure the prefix in a matching face, and scale that to
+     the item's true width: the face need not match exactly, only its proportions. */
+  const meas = document.createElement('canvas').getContext('2d');
+  function prefixWidths(r, p) {
+    if (p.pw) return p.pw;
+    const str = r.text.slice(p.start, p.end), label = `${r.fontLabel || ''} ${r.family || ''}`;
+    const face = /courier|mono/i.test(label) ? '"Courier New", Courier, monospace'
+      : /times|serif/i.test(label) && !/sans/i.test(label) ? '"Times New Roman", Times, serif'
+      : 'Arial, Helvetica, sans-serif';
+    meas.font = `${/bold|black|heavy/i.test(label) ? 'bold ' : ''}100px ${face}`;
+    const pw = [0];
+    for (let k = 1; k <= str.length; k++) pw.push(meas.measureText(str.slice(0, k)).width);
+    return (p.pw = pw);
+  }
+  function fracAt(r, p, k) {
+    const pw = prefixWidths(r, p), total = pw[pw.length - 1];
+    return total > 0 ? pw[Math.max(0, Math.min(pw.length - 1, k))] / total : 0;
+  }
+  // position along the baseline of a character offset
   function uAt(r, ci) {
     for (const p of r.parts) {
-      if (ci <= p.end) { const f = p.end > p.start ? (ci - p.start) / (p.end - p.start) : 0; return p.u0 + Math.max(0, Math.min(1, f)) * (p.u1 - p.u0); }
+      if (ci <= p.end) return p.u0 + (p.end > p.start ? fracAt(r, p, ci - p.start) : 0) * (p.u1 - p.u0);
     }
     return r.u1;
   }
@@ -136,7 +157,11 @@ const KamPdfText = (() => {
       if (u <= p.u1) {
         const span = p.u1 - p.u0 || 1;
         const f = Math.max(0, Math.min(1, (u - p.u0) / span));
-        return p.start + Math.round(f * (p.end - p.start));
+        // the boundary nearest the pointer, using the same measured widths as uAt
+        const pw = prefixWidths(r, p), total = pw[pw.length - 1] || 1;
+        let k = 0;
+        while (k < pw.length - 1 && (pw[k] + pw[k + 1]) / 2 / total < f) k++;
+        return p.start + k;
       }
     }
     return r.text.length;

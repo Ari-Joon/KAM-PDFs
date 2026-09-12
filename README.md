@@ -127,6 +127,8 @@ Unzip and open `index.html` in Chrome, Edge, Firefox, or Safari. Everything work
 
 ## Screenshots
 
+Every screenshot is the real app working on one sample document: a made-up film club review sheet for *The SpongeBob SquarePants Movie*, generated for these pictures and edited with the actual tools.
+
 **Welcome screen.** It asks what you want to do, and shows nothing else until there is a document to work on.
 
 ![Welcome screen](screenshots/welcome.png)
@@ -135,35 +137,37 @@ Unzip and open `index.html` in Chrome, Edge, Firefox, or Safari. Everything work
 
 ![Command search](screenshots/command-search.png)
 
-**Editing existing text.** Double-click a line already in the PDF and it becomes editable in place. Here the red total has been picked up with its own colour, size and typeface.
+**Editing existing text.** Double-click a line already in the PDF and it becomes editable in place, in the line's own font, size and colour. Here the running time is getting a popcorn break added.
 
 ![Editing text that was already in the PDF](screenshots/edit-text.png)
 
-**Find.** Ctrl+F searches every page; Enter steps through the matches.
+**Find.** Ctrl+F searches every page; Enter steps through the matches. Here, every SpongeBob on the sheet.
 
 ![Find in document](screenshots/find.png)
 
 **Pen and colours.** Freehand drawing with any colour and width.
 
-![Pen tool](screenshots/york-pen.png)
+![Pen tool](screenshots/pen.png)
 
-**Signatures.** Draw once, place anywhere, resize.
+**Signatures.** Draw once, place anywhere, resize. It is remembered, so next time it is one click.
 
-![Signature dialog](screenshots/york-sign.png)
+![Signature dialog](screenshots/sign.png)
 
-**Scanning.** The Scan dialog on the computer and the scanner page on the phone.
+**Scanning.** The Scan dialog on the computer, then a photo of the printed sheet on a table, straightened and turned into a clean black-and-white page.
 
 ![Scan dialog](screenshots/scan-dialog.png)
 
+![The page found in a photo, with corners you can drag](screenshots/scan-corners.png)
+
 ![Clean-up preview: straightened and converted to black and white](screenshots/scan-preview.png)
 
-<img src="screenshots/scan-phone.png" width="360" alt="Phone scanner page">
+<img src="screenshots/scan-phone.png" width="360" alt="Phone scanner page with both pages of the review sheet scanned">
 
 **Layers, and a window arranged to suit.** Everything you have added to the page is listed newest first: select, hide, drag to restack, or delete any of it. The dividers either side of the page can be dragged to any width, and the tool row can sit below the page instead of above it.
 
 ![Layers panel and resizable panels](screenshots/layout.png)
 
-**Light mode.** One click on the ☀ button, remembered between sessions.
+**Light mode.** One click on the sun button, remembered between sessions.
 
 ![Light mode](screenshots/light.png)
 
@@ -252,7 +256,7 @@ Install KAM PDFs.bat    double-click installer (Windows)
 node tests/run.js
 ```
 
-Thirty-one tests covering page operations, annotation fidelity, form fields, text editing,
+Thirty-two tests covering page operations, annotation fidelity, form fields, text editing,
 selection, find, spell checking, redaction, OCR, layers, the working copy, undo and the
 scanner, the movable panels, the icon set, the welcome screen, the menus, the command search and the update check. Needs Node 18+ and
 Chrome; nothing to install. See [tests/README.md](tests/README.md) for what each one checks

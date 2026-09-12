@@ -61,8 +61,8 @@ footer #btnSend{grid-column:1/3}
 <main>
   <section id="home" style="display:contents">
     <div class="big-actions">
-      <label class="btn primary"><span class="ico">📷</span>Take photo<input id="camIn" type="file" accept="image/*" capture="environment" multiple hidden></label>
-      <label class="btn"><span class="ico">🖼</span>From gallery<input id="galIn" type="file" accept="image/*" multiple hidden></label>
+      <label class="btn primary"><span class="ico"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 9a2 2 0 0 1 2-2h2l1.4-2h7.2L17 7h2a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><circle cx="12" cy="13" r="3.4"/></svg></span>Take photo<input id="camIn" type="file" accept="image/*" capture="environment" multiple hidden></label>
+      <label class="btn"><span class="ico"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="8.5" cy="10" r="1.6"/><path d="M3.6 17.5 9 12.4l3.4 3.2 3-2.8 5 4.7"/></svg></span>From gallery<input id="galIn" type="file" accept="image/*" multiple hidden></label>
     </div>
     <div id="prog"><div></div></div>
     <div id="pages" class="pages"></div>
@@ -96,7 +96,7 @@ function renderPages() {
   $('#pagesEmpty').style.display = pages.length ? 'none' : '';
   pages.forEach((p, i) => {
     const d = document.createElement('div'); d.className = 'page' + (p.sent ? ' sent' : '');
-    d.innerHTML = `<img src="${p.url}" alt=""><span class="n">${i + 1}</span><button class="x" title="Remove">✕</button><div class="mv"><button data-d="-1">‹</button><button data-d="1">›</button></div>`;
+    d.innerHTML = `<img src="${p.url}" alt=""><span class="n">${i + 1}</span><button class="x" title="Remove" aria-label="Remove"><svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg></button><div class="mv"><button data-d="-1">‹</button><button data-d="1">›</button></div>`;
     d.querySelector('.x').onclick = () => { URL.revokeObjectURL(p.url); pages.splice(i, 1); renderPages(); };
     d.querySelectorAll('.mv button').forEach(b => b.onclick = () => { const j = i + (+b.dataset.d); if (j < 0 || j >= pages.length) return; [pages[i], pages[j]] = [pages[j], pages[i]]; renderPages(); });
     cont.appendChild(d);

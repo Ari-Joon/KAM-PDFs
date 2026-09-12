@@ -25,6 +25,7 @@ anything fails, so it works as a pre-commit or CI check.
 | editing existing text | size, font, colour and position are picked up; the edit reaches the file |
 | selecting text | reading order, multi-line selection, copy, delete |
 | find | matches across pages, in order |
+| search highlight position | the highlight starts and ends on the word it found, checked against the exact glyph widths pdf-lib knows for the standard fonts |
 | spell checking | real mistakes flagged, correct words and acronyms left alone, suggestion ranking |
 | redaction | the removed words are absent from the file, including inside compressed streams |
 | OCR | a scan gains searchable text, in the right reading order |
@@ -41,7 +42,7 @@ anything fails, so it works as a pre-commit or CI check.
 | the version number | core.js, version.json and the service worker cache name all agree |
 | movable panels | a dragged divider actually moves the panel, collapses it, restores it, answers the keyboard, and is remembered across a reload |
 | the tool row | dragging its grip into the lower half moves the tools below the page, and that survives a reload |
-| the icon set | no button or Layers row is left carrying an emoji, every icon a button asks for exists, and they render with a real size and the button's colour |
+| the icon set | no button, Layers row, find bar, scan dialog, signature box or phone scanner page is left carrying an emoji, every icon a button asks for exists, and they render with a real size and the button's colour |
 | the welcome screen | with nothing open, tools and panels are off screen and the four task cards are on it; document-only menu items are disabled; Help is still reachable; opening a document brings everything back |
 | combining PDFs | the Combine card's path joins a 2-page and a 3-page PDF into 5 pages |
 | the command search | Ctrl+K opens it with the cursor in it; every command points at a control that exists; "circle" finds the ellipse tool; a command in a folded section opens it and puts you in the box; document commands are marked, not run, with nothing open |
@@ -80,6 +81,9 @@ Without them that one assertion is skipped and reported as skipped, not silently
   feature wrote the new width to storage while the panel stayed exactly where it was, because
   a flex child was being sized from two places at once; a test that checked the stored value
   would have passed the whole time.
+- The highlight test also proves its own probe is a hard one: it checks that spacing letters evenly,
+  which is what the app used to do, misses by more than the test allows (by 4.7pt on that line,
+  against an allowance of 2.1pt). A test that the old code would also have passed proves nothing.
 - The command search is audited, not sampled: `KamPalette.audit()` checks that every one of its
   commands still points at a control that exists. Moving a button into a menu is exactly the kind of
   change that leaves a command quietly doing nothing.

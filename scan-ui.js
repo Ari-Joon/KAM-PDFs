@@ -13,6 +13,13 @@ const KamScanUI = (() => {
   `;
   function ensureCss() { if (!document.getElementById('ks-css')) { const s = document.createElement('style'); s.id = 'ks-css'; s.textContent = CSS; document.head.appendChild(s); } }
   const next = () => new Promise(r => setTimeout(r, 30));
+  // Drawn inline rather than taken from the editor's icon set, because the phone page has none.
+  const svg = d => `<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-3px;flex:none" aria-hidden="true">${d}</svg>`;
+  const I = {
+    next: svg('<path d="M9 5l7 7-7 7"/>'), back: svg('<path d="M15 5l-7 7 7 7"/>'), check: svg('<path d="M5 12.5l4.5 4.5L19 7.5"/>'),
+    rotL: svg('<path d="M3.5 10.5A8.5 8.5 0 1 1 5 16"/><path d="M3.5 4.5v6h6"/>'),
+    rotR: svg('<path d="M20.5 10.5A8.5 8.5 0 1 0 19 16"/><path d="M20.5 4.5v6h-6"/>'),
+  };
 
   async function open(file, opts) {
     ensureCss();
@@ -64,7 +71,7 @@ const KamScanUI = (() => {
 
     bar.innerHTML = `<span class="ks-step">${autoFound ? 'Page found. Drag the corners if needed.' : 'Drag the corners to the page edges.'}</span>
       <button class="ks-auto" type="button">Auto</button><button class="ks-full" type="button">Whole photo</button>
-      <button class="ks-cancel" type="button">Cancel</button><button class="ks-next primary" type="button">Next ▸</button>`;
+      <button class="ks-cancel" type="button">Cancel</button><button class="ks-next primary" type="button">Next ${I.next}</button>`;
     bar.querySelector('.ks-auto').onclick = () => { corners = KamScan.detectCorners(photo) || KamScan.fullCorners(photo); draw(); };
     bar.querySelector('.ks-full').onclick = () => { corners = KamScan.fullCorners(photo); draw(); };
     bar.querySelector('.ks-cancel').onclick = () => { mount.innerHTML = ''; opts.onCancel && opts.onCancel(); };
@@ -96,8 +103,8 @@ const KamScanUI = (() => {
       }
       bar.innerHTML = `<span class="ks-step">Choose a look, then add the page.</span>
         <span class="ks-modes"><button type="button" data-m="color">Colour</button><button type="button" data-m="gray">Grey</button><button type="button" data-m="bw">B&amp;W</button><button type="button" data-m="none">Original</button></span>
-        <button class="ks-rl" type="button" title="Rotate left">⟲</button><button class="ks-rr" type="button" title="Rotate right">⟳</button>
-        <button class="ks-back" type="button">◂ Corners</button><button class="ks-done primary" type="button">Add page ✓</button>`;
+        <button class="ks-rl" type="button" title="Rotate left" aria-label="Rotate left">${I.rotL}</button><button class="ks-rr" type="button" title="Rotate right" aria-label="Rotate right">${I.rotR}</button>
+        <button class="ks-back" type="button">${I.back} Corners</button><button class="ks-done primary" type="button">${I.check} Add page</button>`;
       bar.querySelectorAll('.ks-modes button').forEach(b => b.onclick = () => { mode = b.dataset.m; render(); });
       bar.querySelector('.ks-rl').onclick = () => { rot = (rot + 3) % 4; render(); };
       bar.querySelector('.ks-rr').onclick = () => { rot = (rot + 1) % 4; render(); };

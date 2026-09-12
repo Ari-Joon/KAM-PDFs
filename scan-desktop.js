@@ -67,7 +67,7 @@
 
   function openScanDialog() {
     const code = makeCode(); received = 0;
-    showModal(`<h3>📷 Scan documents</h3>
+    showModal(`<h3 class="dlg-title"><svg class="ic" aria-hidden="true"><use href="#i-camera"/></svg> Scan documents</h3>
       <div id="scanGrid" class="scan-grid">
         <div class="scan-col">
           <h4>From your phone</h4>
@@ -77,7 +77,7 @@
         </div>
         <div class="scan-col">
           <h4>On this computer</h4>
-          <div class="row"><button id="scanPhotos">🖼 Clean up photos…</button><button id="scanCam">🎥 Use webcam</button></div>
+          <div class="row"><button id="scanPhotos"><svg class="ic" aria-hidden="true"><use href="#i-image"/></svg> Clean up photos…</button><button id="scanCam"><svg class="ic" aria-hidden="true"><use href="#i-camera"/></svg> Use webcam</button></div>
           <div class="muted">Photos of documents get straightened and cleaned up, then added as pages.</div>
           <div id="scanCamBox" hidden style="margin-top:8px"><video id="scanVideo" autoplay playsinline muted style="width:100%;border-radius:8px;background:#000"></video>
             <div class="row" style="margin-top:6px"><button id="scanSnap" class="primary">Capture</button><button id="scanCamStop">Stop camera</button></div></div>

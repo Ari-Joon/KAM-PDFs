@@ -1,5 +1,5 @@
 {
-  "version": "1.15.0",
-  "notes": "calmer and easier: a welcome screen that asks what you want, a File menu, and Ctrl+K to find any command",
+  "version": "1.15.1",
+  "notes": "search highlights land on the right letters, and the last emoji buttons are drawn icons",
   "url": "https://github.com/Ari-Joon/KAM-PDFs/releases/latest"
 }
