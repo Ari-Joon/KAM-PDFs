@@ -24,6 +24,8 @@
   }
 
   const swatch = a => a.redact ? '#000000' : a.type === 'text' ? a.color : (a.fill || a.stroke || a.color || '#888');
+  // the same drawn icons as the rest of the app, rather than glyphs that render differently everywhere
+  const icon = n => `<svg class="ic" aria-hidden="true"><use href="#i-${n}"/></svg>`;
 
   function sig() {
     if (!state.pageIds.length) return 'empty';
@@ -66,10 +68,10 @@
       });
       row.innerHTML = `<span class="layer-dot" style="background:${swatch(a)}"></span>
         <span class="layer-name"><b>${d.kind}</b> <span class="muted">${d.detail}</span></span>
-        <button class="layer-btn" data-act="eye" title="${a.hidden ? 'Show' : 'Hide'}">${a.hidden ? '◌' : '◉'}</button>
-        <button class="layer-btn" data-act="up" title="Bring forward"${i === list.length - 1 ? ' disabled' : ''}>▲</button>
-        <button class="layer-btn" data-act="down" title="Send back"${i === 0 ? ' disabled' : ''}>▼</button>
-        <button class="layer-btn" data-act="del" title="Delete">🗑</button>`;
+        <button class="layer-btn" data-act="eye" title="${a.hidden ? 'Show' : 'Hide'}" aria-label="${a.hidden ? 'Show' : 'Hide'}">${icon(a.hidden ? 'eye-off' : 'eye')}</button>
+        <button class="layer-btn" data-act="up" title="Bring forward" aria-label="Bring forward"${i === list.length - 1 ? ' disabled' : ''}>${icon('up')}</button>
+        <button class="layer-btn" data-act="down" title="Send back" aria-label="Send back"${i === 0 ? ' disabled' : ''}>${icon('down')}</button>
+        <button class="layer-btn" data-act="del" title="Delete" aria-label="Delete">${icon('trash')}</button>`;
       row.onclick = e => {
         const act = e.target.dataset && e.target.dataset.act;
         if (!act) {                                   // clicking the row selects it on the page

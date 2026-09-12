@@ -228,7 +228,7 @@ const propVis = {
   highlight: ['color', 'opacity'], whiteout: [], redact: [], image: ['opacity'],
 };
 const hints = {
-  select: 'Click an annotation to select it. Drag to move, corner square to resize, double-click text to edit.',
+  select: 'Double-click any text to edit it. Click a mark to move or resize it.',
   text: 'Click to place text, or drag to draw a fixed-width box that wraps automatically. Enter starts a new line.', pen: 'Draw freehand.', highlight: 'Drag over text to highlight.',
   rect: 'Drag to draw a rectangle.', ellipse: 'Drag to draw an ellipse.', line: 'Drag to draw a line.',
   arrow: 'Drag to draw an arrow.', whiteout: 'Drag to cover an area with white.',
@@ -240,6 +240,7 @@ function setTool(t) {
   $$('#tools button[data-tool]').forEach(b => b.classList.toggle('active', b.dataset.tool === t));
   overlay.style.cursor = ''; overlay.className = t === 'select' ? '' : t === 'text' ? 'cur-text' : 'cur-cross';
   updateProps(); drawOverlay();
+  document.dispatchEvent(new CustomEvent('kam:tool', { detail: t }));
 }
 $$('#tools button[data-tool]').forEach(b => b.onclick = () => setTool(b.dataset.tool));
 

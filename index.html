@@ -97,9 +97,12 @@ body.resizing #sidebar,body.resizing #rightpanel{transition:none}
   transition:background-image .15s ease}
 #toolbarGrip:hover{background-image:radial-gradient(var(--accent) 1.1px,transparent 1.1px)}
 #toolbarGrip:active{cursor:grabbing}
-#viewer.dock-bottom #toolbar{order:3;border-bottom:0;border-top:1px solid var(--border)}
-#viewer.dock-bottom #updateBar{order:1}
-#viewer.dock-bottom #viewport{order:2}
+/* every child of the viewer has an explicit place, so moving the tools cannot push the status bar to the top */
+#toolbar{order:1} #coach{order:2} #updateBar{order:3} #viewport{order:4}
+#viewer.dock-bottom #coach{order:1}
+#viewer.dock-bottom #updateBar{order:2}
+#viewer.dock-bottom #viewport{order:3}
+#viewer.dock-bottom #toolbar{order:4;border-bottom:0;border-top:1px solid var(--border)}
 #viewer.docking{cursor:grabbing}
 #viewer.docking::after{content:"";position:absolute;left:0;right:0;height:3px;background:var(--accent);
   box-shadow:0 0 14px rgba(245,180,0,.75);z-index:60;pointer-events:none}
@@ -156,7 +159,7 @@ body.resizing #sidebar,body.resizing #rightpanel{transition:none}
 #overlay.cur-text{cursor:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='24' height='24'><g fill='none' stroke='white' stroke-width='4.5' stroke-linecap='round'><path d='M8 3h8M12 3v18M8 21h8'/></g><g fill='none' stroke='black' stroke-width='2' stroke-linecap='round'><path d='M8 3h8M12 3v18M8 21h8'/></g></svg>") 12 12, text}
 #overlay.cur-cross{cursor:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='24' height='24'><g stroke='white' stroke-width='4.5' stroke-linecap='round'><path d='M12 2v20M2 12h20'/></g><g stroke='black' stroke-width='2' stroke-linecap='round'><path d='M12 2v20M2 12h20'/></g><circle cx='12' cy='12' r='2.5' fill='%23f5b400'/></svg>") 12 12, crosshair}
 #textEditor{position:absolute;display:none;background:rgba(255,255,255,.85);border:1px dashed var(--accent);padding:0;margin:0;resize:none;overflow:hidden;color:#000;outline:none;line-height:1.2;min-width:30px;white-space:pre;overflow-wrap:break-word;word-break:break-word;border-radius:0;transform-origin:0 0;caret-color:#1d4ed8;box-shadow:0 0 0 1px rgba(255,255,255,.9),0 0 0 2px rgba(245,180,0,.6)}
-#pager{display:flex;align-items:center;justify-content:center;gap:8px;padding:6px;background:var(--panel);border-top:1px solid var(--border);flex:none}
+#pager{container-type:inline-size;display:grid;grid-template-columns:minmax(0,1fr) auto minmax(max-content,1fr);align-items:center;gap:12px;padding:5px 10px;background:var(--panel);border-top:1px solid var(--border);flex:none;order:5}
 #pager input{width:54px;text-align:center}
 #pageTotal{color:var(--muted)}
 
@@ -178,7 +181,6 @@ body.resizing #sidebar,body.resizing #rightpanel{transition:none}
 #drop.show{display:flex}
 #empty{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;padding:20px;text-align:center;color:var(--muted);font-size:15px}
 #empty.hide{display:none}
-#empty button{font-size:15px;padding:10px 18px}
 
 #modal{position:fixed;inset:0;background:rgba(0,0,0,.6);display:none;align-items:center;justify-content:center;z-index:60;padding:20px}
 #modal.show{display:flex}
@@ -226,9 +228,124 @@ body.resizing #sidebar,body.resizing #rightpanel{transition:none}
 #busy.show{display:flex}
 kbd{background:var(--kbd);border:1px solid var(--border);border-radius:4px;padding:0 4px;font-size:11px}
 @media (max-width:1100px){:root{--w-rightpanel:230px;--w-sidebar:170px}}
+
+/* ================= calm by default ================= */
+/* With no document open there is nothing to select, draw on or zoom, so none of it is shown. */
+body.no-doc #sidebar,body.no-doc #split-sidebar,body.no-doc #toolbar,body.no-doc #pager,
+body.no-doc .doc-only{display:none!important}
+body.no-doc:not(.show-panel) #rightpanel,body.no-doc:not(.show-panel) #split-rightpanel{display:none!important}
+body.no-doc .tabs button:not([data-tab="help"]){display:none}
+
+#topbar{flex-wrap:nowrap;gap:10px;min-height:52px}
+.icon-btn{padding:5px 7px}
+.menu-wrap{position:relative;display:inline-flex}
+.menu-btn .ic-caret{width:13px;height:13px;opacity:.65;margin-left:-3px}
+.menu-btn.open{background:var(--btn-hover);border-color:var(--scroll-hover)}
+.menu{position:absolute;top:calc(100% + 6px);left:0;min-width:260px;background:var(--panel);border:1px solid var(--border);
+  border-radius:10px;padding:6px;box-shadow:0 14px 40px rgba(0,0,0,.38);z-index:90;display:flex;flex-direction:column;gap:1px;animation:menuIn .12s ease}
+@keyframes menuIn{from{opacity:0;transform:translateY(-4px)}to{opacity:1;transform:none}}
+#viewer.dock-bottom .menu{top:auto;bottom:calc(100% + 6px)}
+.menu button{justify-content:flex-start;border:0;background:transparent;padding:7px 10px;border-radius:6px;width:100%;gap:10px}
+.menu button:hover:not(:disabled),.menu button:focus-visible{background:var(--btn-hover);outline:none}
+.menu button span{flex:1;text-align:left}
+.menu button kbd{margin-left:18px;color:var(--muted);background:transparent}
+#tools .menu button.active{background:var(--thumb-sel);color:var(--text);border:0}
+.menu-sep{height:1px;background:var(--border);margin:5px 4px}
+
+#btnCommand{flex:0 1 380px;margin:0 auto;justify-content:flex-start;gap:9px;background:var(--panel2);color:var(--muted);border-radius:8px;min-width:0;padding:6px 10px}
+#btnCommand span{flex:1;min-width:0;text-align:left;overflow:hidden;text-overflow:ellipsis}
+#btnCommand kbd{color:var(--muted)}
+#btnCommand:hover:not(:disabled){border-color:var(--accent);color:var(--text);background:var(--panel2)}
+#btnSave.dirty::after{content:"";width:7px;height:7px;border-radius:50%;background:currentColor;margin-left:1px}
+@media (max-width:1180px){#btnCommand span,#btnCommand kbd,.scan-label{display:none}#btnCommand{flex:0 0 auto;margin:0}}
+@media (max-width:980px){.find-label{display:none}}
+
+#tools{align-items:center}
+.tsep{width:1px;height:22px;background:var(--border);margin:0 3px;flex:none}
+#props:not(:has(label.on)):not(:has(#btnDelAnnot:not([style*="none"]))){display:none}
+
+.status-hint{min-width:0;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+#hint{font-size:12px}
+.status-nav{display:flex;align-items:center;gap:6px}
+.status-zoom{display:flex;align-items:center;gap:4px;justify-self:end}
+.status-zoom button{padding:4px 8px;font-size:12px}
+.status-zoom .icon-btn{padding:4px 6px}
+.side-tip{font-weight:400;margin-top:6px;font-size:11px}
+@container (max-width:720px){.fit-label{display:none}}
+@container (max-width:470px){.status-hint{visibility:hidden}}
+
+#coach{display:flex;align-items:center;gap:10px;flex:none;padding:7px 14px;background:var(--panel2);border-bottom:1px solid var(--border);font-size:12.5px}
+#coach .ic{color:var(--accent);width:17px;height:17px}
+#coach span{flex:1;min-width:0}
+#coach button{padding:3px 12px;font-size:12px}
+
+/* the welcome screen */
+#empty{gap:10px}
+.welcome-logo{width:84px;height:84px;border-radius:20px;box-shadow:0 10px 30px rgba(0,0,0,.4)}
+.welcome-title{font-size:26px;font-weight:800;color:var(--accent);letter-spacing:1px}
+.welcome-title span{color:var(--text);font-weight:500}
+.welcome-sub{font-size:16px;color:var(--text);margin:2px 0 10px}
+.tasks{display:grid;grid-template-columns:repeat(4,minmax(0,184px));gap:12px;margin-bottom:6px}
+@media (max-width:900px){.tasks{grid-template-columns:repeat(2,minmax(0,210px))}}
+#empty .task{display:flex;flex-direction:column;align-items:flex-start;justify-content:flex-start;gap:5px;padding:16px;min-height:136px;
+  border-radius:12px;text-align:left;white-space:normal;background:var(--panel);transition:transform .15s ease,border-color .15s ease,box-shadow .15s ease}
+#empty .task:hover:not(:disabled){border-color:var(--accent);transform:translateY(-2px);box-shadow:0 10px 26px rgba(0,0,0,.22);background:var(--panel)}
+#empty .task .ic{width:26px;height:26px;color:var(--accent);margin-bottom:6px}
+#empty .task b{font-size:14px;color:var(--text)}
+#empty .task span{color:var(--muted);font-size:12px;line-height:1.35}
+#empty .task.lead{border-color:var(--accent);background:linear-gradient(180deg,rgba(245,180,0,.15),rgba(245,180,0,.03))}
+.welcome-more{display:flex;gap:18px;align-items:center;justify-content:center;flex-wrap:wrap}
+button.link{background:none;border:0;padding:2px 0;color:var(--accent);text-decoration:underline;text-underline-offset:3px;font-size:13px}
+button.link:hover:not(:disabled){background:none;color:var(--accent-hover)}
+.welcome-foot{margin-top:4px}
+
+/* document options fold away */
+details.sec{border:1px solid var(--border);border-radius:10px;margin-bottom:8px;background:var(--panel2)}
+details.sec>summary{list-style:none;display:flex;align-items:center;gap:10px;padding:10px 12px;cursor:pointer;user-select:none;border-radius:10px}
+details.sec>summary::-webkit-details-marker{display:none}
+details.sec>summary:hover{background:var(--btn)}
+details.sec>summary .ic{width:18px;height:18px;color:var(--accent)}
+details.sec>summary>span{flex:1;min-width:0}
+details.sec>summary b{display:block;font-size:13px}
+details.sec>summary small{display:block;color:var(--muted);font-size:11.5px;margin-top:1px}
+details.sec>summary::after,details.tip>summary::after{content:"";flex:none;width:7px;height:7px;border-right:1.7px solid var(--muted);border-bottom:1.7px solid var(--muted);transform:rotate(-45deg);transition:transform .15s ease;margin-right:3px}
+details.sec[open]>summary::after,details.tip[open]>summary::after{transform:rotate(45deg)}
+details.sec[open]>summary{border-bottom-left-radius:0;border-bottom-right-radius:0}
+.sec-body{padding:4px 12px 12px}
+.sec-body h4{margin:12px 0 6px}
+details.sec.flash{animation:secFlash 1.3s ease}
+@keyframes secFlash{0%,35%{box-shadow:0 0 0 2px var(--accent)}100%{box-shadow:0 0 0 2px transparent}}
+.help-lead{display:flex;gap:10px;align-items:center;padding:10px 12px;border-radius:10px;background:var(--thumb-sel);margin-bottom:6px;font-size:12.5px}
+.help-lead .ic{color:var(--accent);width:18px;height:18px}
+details.tip{border-bottom:1px solid var(--border)}
+details.tip>summary{list-style:none;display:flex;align-items:center;justify-content:space-between;gap:8px;padding:9px 2px;cursor:pointer;font-weight:600}
+details.tip>summary::-webkit-details-marker{display:none}
+details.tip>div{padding:0 2px 11px;line-height:1.55}
+
+/* the command search */
+#palette{position:fixed;inset:0;z-index:95;background:rgba(8,9,12,.5);display:flex;justify-content:center;align-items:flex-start;padding-top:12vh}
+.palette-box{width:min(640px,92vw);background:var(--panel);border:1px solid var(--border);border-radius:14px;box-shadow:0 24px 70px rgba(0,0,0,.5);overflow:hidden;animation:menuIn .14s ease}
+.palette-field{display:flex;align-items:center;gap:10px;padding:12px 16px;border-bottom:1px solid var(--border)}
+.palette-field .ic{width:19px;height:19px;color:var(--muted)}
+#paletteInput{flex:1;min-width:0;border:0;background:transparent;font-size:16px;padding:4px 0}
+#paletteInput:focus-visible{outline:none}
+#paletteList{max-height:min(430px,56vh);overflow:auto;padding:6px}
+.pal-item{display:flex;align-items:center;gap:11px;padding:8px 10px;border-radius:8px;cursor:pointer}
+.pal-item .ic{color:var(--muted)}
+.pal-item.on{background:var(--btn-hover)}
+.pal-item.on .ic{color:var(--accent)}
+.pal-label{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.pal-item[aria-disabled="true"] .pal-label{color:var(--muted)}
+.pal-note{color:var(--muted);font-size:11.5px}
+.pal-group{color:var(--muted);font-size:10.5px;text-transform:uppercase;letter-spacing:.6px}
+.pal-empty{padding:22px;color:var(--muted);text-align:center}
+.palette-foot{padding:8px 14px;border-top:1px solid var(--border);font-size:11.5px}
+
+.layer-btn{display:inline-flex;align-items:center;justify-content:center;padding:3px 5px}
+.layer-btn .ic{width:13px;height:13px}
 </style>
 </head>
-<body>
+<body class="no-doc">
 <svg id="icons" aria-hidden="true" focusable="false" style="position:absolute;width:0;height:0;overflow:hidden"><defs>
 <symbol id="i-folder" viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h3.6l2 2H19a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></symbol>
 <symbol id="i-camera" viewBox="0 0 24 24"><path d="M3 9a2 2 0 0 1 2-2h2l1.4-2h7.2L17 7h2a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><circle cx="12" cy="13" r="3.4"/></symbol>
@@ -260,27 +377,51 @@ kbd{background:var(--kbd);border:1px solid var(--border);border-radius:4px;paddi
 <symbol id="i-sign" viewBox="0 0 24 24"><path d="M3 16.5c4 0 4.2-10 7.4-10s2.4 9 5.4 9c1.7 0 2.4-1.2 3.2-2.2"/><path d="M3 20.5h18"/></symbol>
 <symbol id="i-prev" viewBox="0 0 24 24"><path d="M15 4.5 8 12l7 7.5"/></symbol>
 <symbol id="i-next" viewBox="0 0 24 24"><path d="M9 4.5 16 12l-7 7.5"/></symbol>
+<symbol id="i-caret" viewBox="0 0 24 24"><path d="M7 10l5 5 5-5"/></symbol>
+<symbol id="i-merge" viewBox="0 0 24 24"><path d="M6 3.5v4.5a4 4 0 0 0 4 4h4a4 4 0 0 0 4-4V3.5"/><path d="M12 12v8.5"/><path d="M8.5 17 12 20.5 15.5 17"/></symbol>
+<symbol id="i-find" viewBox="0 0 24 24"><path d="M12 3.5H6.5a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2H10"/><path d="M8 8h5M8 11.5h2.5"/><circle cx="15.8" cy="15.2" r="3.6"/><path d="M18.4 17.9 21 20.5"/></symbol>
+<symbol id="i-keyboard" viewBox="0 0 24 24"><rect x="2.5" y="6" width="19" height="12" rx="2.5"/><path d="M6.5 10h.01M10 10h.01M14 10h.01M17.5 10h.01M7.5 14h9"/></symbol>
+<symbol id="i-close" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></symbol>
+<symbol id="i-shapes" viewBox="0 0 24 24"><rect x="3.5" y="3.5" width="9" height="9" rx="1.5"/><circle cx="15.5" cy="15.5" r="5"/></symbol>
+<symbol id="i-minus" viewBox="0 0 24 24"><path d="M5 12h14"/></symbol>
+<symbol id="i-fit-width" viewBox="0 0 24 24"><path d="M3 12h18"/><path d="M7 8l-4 4 4 4M17 8l4 4-4 4"/></symbol>
+<symbol id="i-fit-page" viewBox="0 0 24 24"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></symbol>
+<symbol id="i-eye" viewBox="0 0 24 24"><path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12z"/><circle cx="12" cy="12" r="2.8"/></symbol>
+<symbol id="i-eye-off" viewBox="0 0 24 24"><path d="M3 3l18 18"/><path d="M10.6 6.1A9.8 9.8 0 0 1 12 6c6 0 9.5 6 9.5 6a17 17 0 0 1-3 3.7M6.3 7.6C3.9 9.3 2.5 12 2.5 12S6 18.5 12 18.5a9.5 9.5 0 0 0 4.3-1"/></symbol>
+<symbol id="i-up" viewBox="0 0 24 24"><path d="M6 15l6-6 6 6"/></symbol>
+<symbol id="i-down" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></symbol>
+<symbol id="i-stamp" viewBox="0 0 24 24"><path d="M9.5 3.5h5l-1 7h-3z"/><path d="M4.5 14.5a2 2 0 0 1 2-2h11a2 2 0 0 1 2 2V17h-15z"/><path d="M5 20.5h14"/></symbol>
+<symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 11v5.5M12 7.8h.01"/></symbol>
+<symbol id="i-settings" viewBox="0 0 24 24"><path d="M4 6h9M17 6h3M4 12h3M11 12h9M4 18h11M19 18h1"/><circle cx="15" cy="6" r="2"/><circle cx="9" cy="12" r="2"/><circle cx="17" cy="18" r="2"/></symbol>
+<symbol id="i-bulb" viewBox="0 0 24 24"><path d="M9 18h6M10 21h4"/><path d="M12 3a6 6 0 0 0-3.5 10.9c.6.5 1 1.2 1 2V16h5v-.1c0-.8.4-1.5 1-2A6 6 0 0 0 12 3z"/></symbol>
 </defs></svg>
 <header id="topbar">
   <div class="brand"><img src="logo-mark.svg" alt="KAM logo"> KAM <span>PDFs</span></div>
-  <div class="group">
-    <button id="btnOpen" title="Open a PDF (Ctrl+O)"><svg class="ic" aria-hidden="true"><use href="#i-folder"/></svg> Open</button>
-    <button id="btnNew" title="Create a new blank document">New</button>
-    <button id="btnMerge" title="Append pages from other PDFs">Merge PDF…</button>
-    <button id="btnAddImages" title="Add images as new pages">Images → pages</button>
-    <button id="btnScan" title="Scan documents with your phone or webcam"><svg class="ic" aria-hidden="true"><use href="#i-camera"/></svg> Scan</button>
+  <div class="menu-wrap">
+    <button id="btnFile" class="menu-btn" aria-haspopup="menu" aria-expanded="false" aria-controls="fileMenu" title="Open, combine, save a copy, print">File <svg class="ic ic-caret" aria-hidden="true"><use href="#i-caret"/></svg></button>
+    <div class="menu" id="fileMenu" role="menu" aria-label="File" hidden>
+      <button id="btnOpen" role="menuitem"><svg class="ic" aria-hidden="true"><use href="#i-folder"/></svg><span>Open a PDF…</span><kbd>Ctrl+O</kbd></button>
+      <button id="btnNew" role="menuitem"><svg class="ic" aria-hidden="true"><use href="#i-plus"/></svg><span>New blank document</span></button>
+      <div class="menu-sep" role="separator"></div>
+      <button id="btnMerge" role="menuitem" data-needs-doc><svg class="ic" aria-hidden="true"><use href="#i-merge"/></svg><span>Combine with other PDFs…</span></button>
+      <button id="btnAddImages" role="menuitem"><svg class="ic" aria-hidden="true"><use href="#i-image"/></svg><span>Add images as pages…</span></button>
+      <div class="menu-sep" role="separator"></div>
+      <button id="btnSaveAs" role="menuitem" data-needs-doc><svg class="ic" aria-hidden="true"><use href="#i-download"/></svg><span>Save as a new file…</span><kbd>Ctrl+Shift+S</kbd></button>
+      <button id="btnPng" role="menuitem" data-needs-doc><svg class="ic" aria-hidden="true"><use href="#i-image"/></svg><span>Export this page as PNG</span></button>
+      <button id="btnPrint" role="menuitem" data-needs-doc><svg class="ic" aria-hidden="true"><use href="#i-print"/></svg><span>Print…</span><kbd>Ctrl+P</kbd></button>
+    </div>
   </div>
-  <div class="group">
-    <button id="btnUndo" title="Undo (Ctrl+Z)"><svg class="ic" aria-hidden="true"><use href="#i-undo"/></svg> Undo</button>
-    <button id="btnRedo" title="Redo (Ctrl+Y)"><svg class="ic" aria-hidden="true"><use href="#i-redo"/></svg> Redo</button>
-    <button id="btnFind" title="Find in document (Ctrl+F)"><svg class="ic" aria-hidden="true"><use href="#i-search"/></svg> Find</button>
+  <div class="group doc-only">
+    <button id="btnUndo" class="icon-btn" title="Undo (Ctrl+Z)" aria-label="Undo"><svg class="ic" aria-hidden="true"><use href="#i-undo"/></svg></button>
+    <button id="btnRedo" class="icon-btn" title="Redo (Ctrl+Y)" aria-label="Redo"><svg class="ic" aria-hidden="true"><use href="#i-redo"/></svg></button>
+    <button id="btnFind" title="Find text in the document (Ctrl+F)"><svg class="ic" aria-hidden="true"><use href="#i-find"/></svg><span class="find-label">Find</span></button>
   </div>
-  <div class="group">
-    <button id="btnSave" class="primary" title="Download the edited PDF (Ctrl+S)"><svg class="ic" aria-hidden="true"><use href="#i-download"/></svg> Save PDF</button>
-    <button id="btnPrint"><svg class="ic" aria-hidden="true"><use href="#i-print"/></svg> Print</button>
-  </div>
+  <button id="btnCommand" title="Find any command by typing its name (Ctrl+K)"><svg class="ic" aria-hidden="true"><use href="#i-search"/></svg><span>Search commands, e.g. watermark, rotate…</span><kbd>Ctrl+K</kbd></button>
   <div class="group right">
-    <button id="btnZoomOut">−</button><span id="zoomLabel">100%</span><button id="btnZoomIn">+</button><button id="btnFit">Fit width</button><button id="btnFitPage">Fit page</button><button id="btnTheme" title="Switch light / dark mode"><svg class="ic" aria-hidden="true"><use href="#i-sun"/></svg><svg class="ic" aria-hidden="true"><use href="#i-moon"/></svg></button><button id="btnInstall" class="primary" hidden title="Install KAM PDFs as an app with its own window and icon"><svg class="ic" aria-hidden="true"><use href="#i-app"/></svg> Install app</button>
+    <button id="btnScan" title="Scan documents with your phone or webcam"><svg class="ic" aria-hidden="true"><use href="#i-camera"/></svg><span class="scan-label">Scan</span></button>
+    <button id="btnTheme" class="icon-btn" title="Switch light / dark mode" aria-label="Switch light or dark mode"><svg class="ic" aria-hidden="true"><use href="#i-sun"/></svg><svg class="ic" aria-hidden="true"><use href="#i-moon"/></svg></button>
+    <button id="btnInstall" hidden title="Install KAM PDFs as an app with its own window and icon"><svg class="ic" aria-hidden="true"><use href="#i-app"/></svg> Install app</button>
+    <button id="btnSave" class="primary doc-only" title="Save the PDF (Ctrl+S)"><svg class="ic" aria-hidden="true"><use href="#i-download"/></svg> Save PDF</button>
   </div>
 </header>
 <div id="main">
@@ -294,7 +435,7 @@ kbd{background:var(--kbd);border:1px solid var(--border);border-radius:4px;paddi
         <button data-act="extract" title="Extract selected pages to a new PDF"><svg class="ic" aria-hidden="true"><use href="#i-extract"/></svg></button>
         <button data-act="del" title="Delete page(s)"><svg class="ic" aria-hidden="true"><use href="#i-trash"/></svg></button>
       </div>
-      <div class="muted" style="font-weight:400;margin-top:4px;font-size:11px">Click to select · Ctrl/Shift+click for multiple · drag to reorder</div>
+      <div class="muted side-tip">Drag to reorder · Ctrl+click to pick several</div>
     </div>
     <div id="thumbs"></div>
   </aside>
@@ -303,19 +444,27 @@ kbd{background:var(--kbd);border:1px solid var(--border);border-radius:4px;paddi
   <section id="viewer">
     <div id="toolbar">
       <div id="toolbarGrip" title="Drag to put the tools below the page" aria-label="Move the tool row"></div>
-      <div id="tools" class="group">
-        <button data-tool="select" title="Select / move (V)"><svg class="ic" aria-hidden="true"><use href="#i-cursor"/></svg> Select</button>
+      <div id="tools" class="group" role="toolbar" aria-label="Tools">
+        <button data-tool="select" title="Select, move and edit (V)"><svg class="ic" aria-hidden="true"><use href="#i-cursor"/></svg> Select</button>
         <button data-tool="text" title="Add text (T)"><svg class="ic" aria-hidden="true"><use href="#i-text"/></svg> Text</button>
-        <button data-tool="pen" title="Freehand pen (P)"><svg class="ic" aria-hidden="true"><use href="#i-pen"/></svg> Pen</button>
+        <span class="tsep" aria-hidden="true"></span>
+        <button data-tool="pen" title="Draw freehand (P)"><svg class="ic" aria-hidden="true"><use href="#i-pen"/></svg> Pen</button>
         <button data-tool="highlight" title="Highlight (H)"><svg class="ic" aria-hidden="true"><use href="#i-highlight"/></svg> Highlight</button>
-        <button data-tool="rect" title="Rectangle (R)"><svg class="ic" aria-hidden="true"><use href="#i-rect"/></svg> Rect</button>
-        <button data-tool="ellipse" title="Ellipse (E)"><svg class="ic" aria-hidden="true"><use href="#i-ellipse"/></svg> Ellipse</button>
-        <button data-tool="line" title="Line (L)"><svg class="ic" aria-hidden="true"><use href="#i-line"/></svg> Line</button>
-        <button data-tool="arrow" title="Arrow (A)"><svg class="ic" aria-hidden="true"><use href="#i-arrow"/></svg> Arrow</button>
+        <div class="menu-wrap">
+          <button id="btnShapes" class="menu-btn" aria-haspopup="menu" aria-expanded="false" aria-controls="shapeMenu" title="Rectangle, ellipse, line or arrow (R, E, L, A)"><svg class="ic" id="shapesIcon" aria-hidden="true"><use href="#i-shapes"/></svg> Shapes <svg class="ic ic-caret" aria-hidden="true"><use href="#i-caret"/></svg></button>
+          <div class="menu" id="shapeMenu" role="menu" aria-label="Shapes" hidden>
+            <button data-tool="rect" role="menuitem"><svg class="ic" aria-hidden="true"><use href="#i-rect"/></svg><span>Rectangle</span><kbd>R</kbd></button>
+            <button data-tool="ellipse" role="menuitem"><svg class="ic" aria-hidden="true"><use href="#i-ellipse"/></svg><span>Ellipse</span><kbd>E</kbd></button>
+            <button data-tool="line" role="menuitem"><svg class="ic" aria-hidden="true"><use href="#i-line"/></svg><span>Line</span><kbd>L</kbd></button>
+            <button data-tool="arrow" role="menuitem"><svg class="ic" aria-hidden="true"><use href="#i-arrow"/></svg><span>Arrow</span><kbd>A</kbd></button>
+          </div>
+        </div>
+        <span class="tsep" aria-hidden="true"></span>
         <button data-tool="whiteout" title="Cover an area with white (W)"><svg class="ic" aria-hidden="true"><use href="#i-whiteout"/></svg> Whiteout</button>
         <button data-tool="redact" title="Redact: permanently remove what is underneath (X)"><svg class="ic" aria-hidden="true"><use href="#i-redact"/></svg> Redact</button>
-        <button id="btnImage" title="Insert image"><svg class="ic" aria-hidden="true"><use href="#i-image"/></svg> Image</button>
-        <button id="btnSign" title="Draw a signature"><svg class="ic" aria-hidden="true"><use href="#i-sign"/></svg> Sign</button>
+        <span class="tsep" aria-hidden="true"></span>
+        <button id="btnImage" title="Insert an image"><svg class="ic" aria-hidden="true"><use href="#i-image"/></svg> Image</button>
+        <button id="btnSign" title="Add your signature"><svg class="ic" aria-hidden="true"><use href="#i-sign"/></svg> Sign</button>
       </div>
       <div class="sep"></div>
       <div id="props">
@@ -327,8 +476,11 @@ kbd{background:var(--kbd);border:1px solid var(--border);border-radius:4px;paddi
         <label data-p="bold"><input type="checkbox" id="pBold"> Bold</label>
         <label data-p="opacity">Opacity <input type="range" id="pOpacity" min="0.05" max="1" step="0.05" value="1"></label>
         <button id="btnDelAnnot" style="display:none" title="Delete selected (Del)"><svg class="ic" aria-hidden="true"><use href="#i-trash"/></svg> Delete</button>
-        <span id="hint" class="muted"></span>
       </div>
+    </div>
+    <div id="coach" role="status" hidden>
+      <svg class="ic" aria-hidden="true"><use href="#i-bulb"/></svg><span><b>Tip:</b> double-click any text in the PDF to edit it, and press <kbd>Ctrl+K</kbd> to find any command by name.</span>
+      <button id="coachClose">Got it</button>
     </div>
     <div id="updateBar" hidden>
       <span id="updateDot"></span>
@@ -344,17 +496,37 @@ kbd{background:var(--kbd);border:1px solid var(--border);border-radius:4px;paddi
         <textarea id="textEditor" rows="1" spellcheck="true" autocorrect="off" autocapitalize="sentences"></textarea>
       </div>
       <div id="empty">
-        <img src="logo.svg" alt="KAM logo" style="width:112px;height:112px;border-radius:24px;box-shadow:0 8px 28px rgba(0,0,0,.5)">
-        <div style="font-size:22px;font-weight:800;color:#f5b400;letter-spacing:1px">KAM <span style="color:#e6e6ea;font-weight:500">PDFs</span></div>
-        <div>Open a PDF to get started, or drop one anywhere</div>
-        <div class="group"><button id="btnOpen2" class="primary">Open PDF</button><button id="btnNew2">New blank document</button><button id="btnScan2"><svg class="ic" aria-hidden="true"><use href="#i-camera"/></svg> Scan a document</button><button id="btnRestoreEmpty" hidden>Restore last session</button></div>
-        <div class="muted">Free, offline, no sign-up. Files never leave your computer.</div>
+        <img src="logo.svg" alt="KAM logo" class="welcome-logo">
+        <div class="welcome-title">KAM <span>PDFs</span></div>
+        <div class="welcome-sub">What would you like to do?</div>
+        <div class="tasks">
+          <button id="btnOpen2" class="task lead"><svg class="ic" aria-hidden="true"><use href="#i-pen"/></svg><b>Edit or sign a PDF</b><span>Change text, fill in forms, add a signature</span></button>
+          <button id="taskCombine" class="task"><svg class="ic" aria-hidden="true"><use href="#i-merge"/></svg><b>Combine PDFs</b><span>Pick several files to join into one</span></button>
+          <button id="taskImages" class="task"><svg class="ic" aria-hidden="true"><use href="#i-image"/></svg><b>Photos to PDF</b><span>Turn pictures into pages</span></button>
+          <button id="btnScan2" class="task"><svg class="ic" aria-hidden="true"><use href="#i-camera"/></svg><b>Scan a document</b><span>Use your phone as a scanner</span></button>
+        </div>
+        <div class="welcome-more">
+          <button id="btnRestoreEmpty" class="link" hidden>Restore last session</button>
+          <button id="btnNew2" class="link">Start with a blank page</button>
+          <button id="btnHelpEmpty" class="link">Help &amp; shortcuts</button>
+        </div>
+        <div class="muted welcome-foot">Or drop a PDF anywhere. Free, offline, no sign-up. Files never leave your computer.</div>
       </div>
     </div>
     <div id="pager">
-      <button id="btnPrev"><svg class="ic" aria-hidden="true"><use href="#i-prev"/></svg></button>
-      <input id="pageNum" type="number" min="1" value="1"> <span id="pageTotal">/ 0</span>
-      <button id="btnNext"><svg class="ic" aria-hidden="true"><use href="#i-next"/></svg></button>
+      <div class="status-hint"><span id="hint" class="muted"></span></div>
+      <div class="status-nav">
+        <button id="btnPrev" class="icon-btn" title="Previous page (Page Up)" aria-label="Previous page"><svg class="ic" aria-hidden="true"><use href="#i-prev"/></svg></button>
+        <input id="pageNum" type="number" min="1" value="1" aria-label="Page number"> <span id="pageTotal">/ 0</span>
+        <button id="btnNext" class="icon-btn" title="Next page (Page Down)" aria-label="Next page"><svg class="ic" aria-hidden="true"><use href="#i-next"/></svg></button>
+      </div>
+      <div class="status-zoom">
+        <button id="btnZoomOut" class="icon-btn" title="Zoom out (Ctrl + mouse wheel)" aria-label="Zoom out"><svg class="ic" aria-hidden="true"><use href="#i-minus"/></svg></button>
+        <span id="zoomLabel">100%</span>
+        <button id="btnZoomIn" class="icon-btn" title="Zoom in (Ctrl + mouse wheel)" aria-label="Zoom in"><svg class="ic" aria-hidden="true"><use href="#i-plus"/></svg></button>
+        <button id="btnFit" title="Fit the page width to the window"><svg class="ic" aria-hidden="true"><use href="#i-fit-width"/></svg><span class="fit-label">Width</span></button>
+        <button id="btnFitPage" title="Fit the whole page in the window"><svg class="ic" aria-hidden="true"><use href="#i-fit-page"/></svg><span class="fit-label">Page</span></button>
+      </div>
     </div>
   </section>
   <div class="splitter" id="split-rightpanel" role="separator" aria-orientation="vertical"
@@ -367,41 +539,67 @@ kbd{background:var(--kbd);border:1px solid var(--border);border-radius:4px;paddi
       <button data-tab="help">Help</button>
     </div>
     <div class="tab active" id="tab-doc">
-      <h4>Save</h4>
-      <div class="row"><label><input type="checkbox" id="flattenForm"> Always flatten form fields (make them non-editable)</label></div>
-      <div class="muted">Fields are flattened automatically anyway if you draw over one, because viewers paint fields on top of the page.</div>
-      <div class="row"><button id="btnSave2" class="primary"><svg class="ic" aria-hidden="true"><use href="#i-download"/></svg> Save PDF</button><button id="btnSaveAs" title="Save to a new file (Ctrl+Shift+S)">Save as…</button><button id="btnPng">Page → PNG</button></div>
-      <h4>Extract / split pages</h4>
-      <div class="row"><input id="extractRange" placeholder="e.g. 1-3, 7, 10-12" style="flex:1"><button id="btnExtract">Extract</button></div>
-      <div class="muted">Saves the listed pages as a separate PDF.</div>
-      <h4>Watermark (all pages)</h4>
-      <div class="row"><input id="wmText" placeholder="CONFIDENTIAL" style="flex:1"><input id="wmOpacity" type="number" min="0.05" max="1" step="0.05" value="0.3" title="Opacity" style="width:60px"><button id="btnWatermark">Add</button></div>
-      <h4>Page numbers (all pages)</h4>
-      <div class="row"><input id="pnFormat" value="Page {n} of {total}" style="flex:1"><select id="pnPos"><option value="bottom">Bottom</option><option value="top">Top</option></select><button id="btnPageNums">Add</button></div>
-      <h4>Text</h4>
-      <div class="row"><button id="btnExtractText">Extract text of this page</button></div>
-      <h4>Scanned pages (OCR)</h4>
-      <div class="row"><button id="btnOcrPage">Read this page</button><button id="btnOcrAll">Read all pages</button></div>
-      <div id="ocrState" class="muted"></div>
-      <div class="muted">Finds the words in a scan and adds them to the saved PDF as an invisible layer, so it becomes searchable. Runs on your computer.</div>
-      <h4>Layout</h4>
-      <div class="row"><button data-collapse="sidebar">Pages panel</button><button data-collapse="rightpanel">This panel</button><button id="btnResetLayout">Reset layout</button></div>
-      <div class="muted">Drag the dividers either side of the page to resize the panels, or drag the dotted grip on the tool row to put the tools below the page. Double-click a divider to reset it.</div>
-      <h4>Working copy</h4>
-      <div class="row"><label><input type="checkbox" id="autosaveOn" checked> Keep a copy so a crash does not lose your work</label></div>
-      <div class="row"><button id="btnRestore" hidden>Restore last session</button><button id="btnForget">Forget saved work</button></div>
-      <div id="autosaveState" class="muted"></div>
-      <div class="muted">Kept only in this browser on this computer. Nothing is uploaded.</div>
-      <h4>Spelling</h4>
-      <div class="row"><label><input type="checkbox" id="spellUnderline" checked> Underline misspelled words</label></div>
-      <div class="row"><button id="btnSpell">Check spelling</button><span id="spellState" class="muted"></span></div>
-      <div class="muted">Checks the text you have added, not the text already in the PDF.</div>
-      <h4>Metadata</h4>
-      <div class="field"><label>Title</label><input id="mTitle"></div>
-      <div class="field"><label>Author</label><input id="mAuthor"></div>
-      <div class="field"><label>Subject</label><input id="mSubject"></div>
-      <div class="field"><label>Keywords (comma separated)</label><input id="mKeywords"></div>
-      <div class="row"><button id="btnMeta">Apply metadata</button></div>
+      <details class="sec" data-sec="export" open>
+        <summary><svg class="ic" aria-hidden="true"><use href="#i-download"/></svg><span><b>Save &amp; export</b><small>Save, lock form fields, pull out pages</small></span></summary>
+        <div class="sec-body">
+          <div class="row"><button id="btnSave2" class="primary"><svg class="ic" aria-hidden="true"><use href="#i-download"/></svg> Save PDF</button></div>
+          <div class="row"><label><input type="checkbox" id="flattenForm"> Flatten form fields so they can't be changed</label></div>
+          <div class="muted">Fields you draw over are flattened anyway, because viewers paint fields on top of the page.</div>
+          <h4>Extract pages</h4>
+          <div class="row"><input id="extractRange" placeholder="e.g. 1-3, 7, 10-12" style="flex:1" aria-label="Pages to extract"><button id="btnExtract">Extract</button></div>
+          <div class="muted">Saves the listed pages as a separate PDF.</div>
+        </div>
+      </details>
+      <details class="sec" data-sec="stamp">
+        <summary><svg class="ic" aria-hidden="true"><use href="#i-stamp"/></svg><span><b>Stamp every page</b><small>Watermark and page numbers</small></span></summary>
+        <div class="sec-body">
+          <h4>Watermark</h4>
+          <div class="row"><input id="wmText" placeholder="CONFIDENTIAL" style="flex:1" aria-label="Watermark text"><input id="wmOpacity" type="number" min="0.05" max="1" step="0.05" value="0.3" title="Opacity" aria-label="Watermark opacity" style="width:60px"><button id="btnWatermark">Add</button></div>
+          <h4>Page numbers</h4>
+          <div class="row"><input id="pnFormat" value="Page {n} of {total}" style="flex:1" aria-label="Page number format"><select id="pnPos" aria-label="Page number position"><option value="bottom">Bottom</option><option value="top">Top</option></select><button id="btnPageNums">Add</button></div>
+        </div>
+      </details>
+      <details class="sec" data-sec="ocr">
+        <summary><svg class="ic" aria-hidden="true"><use href="#i-find"/></svg><span><b>Scanned pages</b><small>Make a scan searchable and copyable</small></span></summary>
+        <div class="sec-body">
+          <div class="row"><button id="btnOcrPage">Read this page</button><button id="btnOcrAll">Read all pages</button></div>
+          <div id="ocrState" class="muted"></div>
+          <div class="muted">Finds the words in a scan and adds them to the saved PDF as an invisible layer, so it becomes searchable. Runs on your computer.</div>
+        </div>
+      </details>
+      <details class="sec" data-sec="text">
+        <summary><svg class="ic" aria-hidden="true"><use href="#i-text"/></svg><span><b>Text &amp; spelling</b><small>Check spelling, copy out a page's text</small></span></summary>
+        <div class="sec-body">
+          <div class="row"><label><input type="checkbox" id="spellUnderline" checked> Underline misspelled words</label></div>
+          <div class="row"><button id="btnSpell">Check spelling</button><span id="spellState" class="muted"></span></div>
+          <div class="muted">Checks the text you have added, not the text already in the PDF.</div>
+          <h4>Page text</h4>
+          <div class="row"><button id="btnExtractText">Copy out the text of this page</button></div>
+        </div>
+      </details>
+      <details class="sec" data-sec="details">
+        <summary><svg class="ic" aria-hidden="true"><use href="#i-info"/></svg><span><b>Document details</b><small>Title, author, subject, keywords</small></span></summary>
+        <div class="sec-body">
+          <div class="field"><label for="mTitle">Title</label><input id="mTitle"></div>
+          <div class="field"><label for="mAuthor">Author</label><input id="mAuthor"></div>
+          <div class="field"><label for="mSubject">Subject</label><input id="mSubject"></div>
+          <div class="field"><label for="mKeywords">Keywords (comma separated)</label><input id="mKeywords"></div>
+          <div class="row"><button id="btnMeta">Apply details</button></div>
+        </div>
+      </details>
+      <details class="sec" data-sec="settings">
+        <summary><svg class="ic" aria-hidden="true"><use href="#i-settings"/></svg><span><b>Settings</b><small>Layout and the automatic working copy</small></span></summary>
+        <div class="sec-body">
+          <h4>Layout</h4>
+          <div class="row"><button data-collapse="sidebar">Pages panel</button><button data-collapse="rightpanel">This panel</button><button id="btnResetLayout">Reset layout</button></div>
+          <div class="muted">Drag the dividers beside the page to resize the panels, or the dotted grip on the tool row to put the tools under the page. Double-click a divider to reset it.</div>
+          <h4>Working copy</h4>
+          <div class="row"><label><input type="checkbox" id="autosaveOn" checked> Keep a copy so a crash does not lose your work</label></div>
+          <div class="row"><button id="btnRestore" hidden>Restore last session</button><button id="btnForget">Forget saved work</button></div>
+          <div id="autosaveState" class="muted"></div>
+          <div class="muted">Kept only in this browser on this computer. Nothing is uploaded.</div>
+        </div>
+      </details>
     </div>
     <div class="tab" id="tab-layers">
       <div class="row"><span class="muted" style="flex:1">Everything you have added to this page, newest first. Drag a row to restack it.</span><button id="btnLayersClear">Clear page</button></div>
@@ -413,8 +611,10 @@ kbd{background:var(--kbd);border:1px solid var(--border);border-radius:4px;paddi
     </div>
     <div class="tab" id="tab-help">
       <div class="row" style="margin-bottom:10px"><span class="muted">KAM PDFs <b id="appVersion">v?</b> · free forever · <a href="https://github.com/Ari-Joon/KAM-PDFs" target="_blank" rel="noopener" style="color:var(--accent)">GitHub</a></span><span style="flex:1"></span><button id="btnUpdate">Check for updates</button></div>
+      <div class="help-lead"><svg class="ic" aria-hidden="true"><use href="#i-search"/></svg><span>Press <kbd>Ctrl+K</kbd> and type what you want to do. Every command is in there.</span></div>
       <h4>Shortcuts</h4>
       <div class="muted" style="line-height:1.9">
+        <kbd>Ctrl+K</kbd> find any command · <kbd>Ctrl+F</kbd> find text<br>
         <kbd>V</kbd> select · <kbd>T</kbd> text · <kbd>P</kbd> pen · <kbd>H</kbd> highlight<br>
         <kbd>R</kbd> rect · <kbd>E</kbd> ellipse · <kbd>L</kbd> line · <kbd>A</kbd> arrow · <kbd>W</kbd> whiteout<br>
         <kbd>Del</kbd> delete · <kbd>Ctrl+Z</kbd> undo · <kbd>Ctrl+Y</kbd> redo · <kbd>Esc</kbd> deselect<br>
@@ -422,25 +622,20 @@ kbd{background:var(--kbd);border:1px solid var(--border);border-radius:4px;paddi
         <kbd>←</kbd>/<kbd>→</kbd> pages · <kbd>Ctrl</kbd>+wheel zoom · <kbd>Ctrl+S</kbd> save · <kbd>Ctrl+P</kbd> print<br>
         <kbd>Shift</kbd> while drawing · square shapes, 45° lines
       </div>
-      <h4>Tips</h4>
-      <div class="muted" style="line-height:1.6">
-        <b>Text:</b> click to place free text, or drag out a box first and the text wraps to that width. Drag the corner square to change the width. Double-click to edit. Paste an image from the clipboard with Ctrl+V.<br><br>
-        Annotations are drawn on top of the page when you save. Whiteout only covers content visually; the underlying text stays in the file.<br><br>
-        <b>Deleting text:</b> click a line of the PDF's own text and press Delete. Deleted areas are marked with a red hatch on screen so you can see them; the hatch is not in the saved file, only clean paper. Clicking a hatched area selects the deletion, so pressing Delete again takes the deletion away and the words come back.<br><br>
-        <b>Layers:</b> the Layers tab lists everything you have added to the page, newest first. Click one to select it, hide it with ◉, move it forward or back with ▲▼, or delete it. You can also drag a row up or down to put it where you want. Deleted text is listed too, quoting the words that were removed, so you can find a deletion and take it back. Useful once marks start overlapping.<br><br>
-        <b>Typing over a cover:</b> double-click anywhere, including inside a whiteout, and you get a text box there.<br><br>
-        <b>Redact:</b> the ⬛ Redact tool removes what is underneath. When you save, that page is rebuilt from a picture of itself, so the hidden words are not in the file at all. Whiteout only covers text; anyone can still extract it.<br><br>
-        <b>Select and copy:</b> drag across text already in the PDF to select it, then Ctrl+C. A single click picks a line so Delete can remove it.<br><br>
-        <b>Scanned pages:</b> "Read this page" under Scanned pages finds the words in a scan and adds them to the saved PDF as an invisible layer, so it becomes searchable. It runs on your computer.<br><br>
-        <b>Edit existing text:</b> with the Select tool, hover over any text already in the PDF and it lights up. Double-click it to edit that line in place: the original is covered with the page's own background colour and replaced by a text box you can type in, matched for size and colour. Delete everything in the box to remove the line. <b>Find</b> (Ctrl+F) searches the whole document.<br><br>
-        <b>Spelling:</b> misspelled words in text you add get a red dotted underline, and your browser underlines them while you type (right-click for its suggestions). "Check spelling" in the Document tab lists every one with corrections, and you can add words to your own dictionary.<br><br>
-        <b>Arranging the window:</b> drag the divider either side of the page to resize the Pages and Document panels, and keep dragging past the end to fold one away entirely. Double-click a divider to put it back. The dotted grip at the left of the tool row moves the tools below the page if you would rather have them there. Everything you set is remembered, and <b>Reset layout</b> in the Document tab undoes the lot.<br><br>
-        <b>Updates:</b> if you are online, KAM PDFs checks now and then whether a newer version exists and says so in a green bar under the tools. <b>Update now</b> does it right there: it fetches the new version and restarts, keeping a working copy of whatever is open first. A copy you unzipped into a folder cannot replace its own files, so the button takes you to the download instead. <b>Not now</b> hides the bar until there is something newer still. Nothing about you or your file is sent; it only asks what the latest version number is.<br><br>
-        <b>Signatures:</b> a signature you draw is kept on this computer, so next time you can pick it from the gallery in the Sign box instead of drawing it again.<br><br>
-        <b>Your work is kept as you go:</b> a working copy of the document and everything you have added is stored in this browser on this computer. If the window closes or the computer restarts, reopen KAM PDFs and it offers your last session back. Nothing is uploaded. Turn it off or clear it under Working copy in the Document tab.<br><br>
-        <b>Scan:</b> click 📷 Scan, point your phone at the QR code, photograph pages on the phone and tap Send. Pages arrive here straightened and cleaned up. No phone? Use the webcam or clean up existing photos.<br><br>
-        Password-protected PDFs can't be opened. Print them to a new PDF first.
-      </div>
+      <h4>How do I…</h4>
+      <details class="tip"><summary>Edit text that is already in the PDF</summary><div class="muted">With <b>Select</b> chosen, hover over any text in the PDF and it lights up. Double-click to edit that line in place, matched for size, font and colour. Clear the box to remove the line.</div></details>
+      <details class="tip"><summary>Add your own text</summary><div class="muted">Choose <b>Text</b>, then click to place it, or drag out a box first so the words wrap to fit. Double-click it later to change it. Paste an image from the clipboard with Ctrl+V.</div></details>
+      <details class="tip"><summary>Delete text from the PDF</summary><div class="muted">Click a line of the PDF's own text and press Delete. Deleted areas show a red hatch on screen only; the saved file just has clean paper there. Click the hatch and press Delete again to bring the words back.</div></details>
+      <details class="tip"><summary>Sign a document</summary><div class="muted">Choose <b>Sign</b>, draw your signature once, and place it on the page. It is kept on this computer, so next time you pick it from the gallery instead of drawing it again.</div></details>
+      <details class="tip"><summary>Whiteout or Redact?</summary><div class="muted"><b>Whiteout</b> covers things visually, but the words are still in the file and can be copied out. <b>Redact</b> removes them: when you save, that page is rebuilt from a picture of itself, so the hidden words are gone for good.</div></details>
+      <details class="tip"><summary>Reach a mark buried under others</summary><div class="muted">The <b>Layers</b> tab lists everything you have added to the page, newest first. Select, hide, restack (drag a row) or delete anything. Deletions are listed too, quoting the words removed, so you can take one back. Double-click anywhere, even inside a whiteout, to type there.</div></details>
+      <details class="tip"><summary>Scan with your phone</summary><div class="muted">Click <b>Scan</b> and point your phone at the QR code. Photograph pages and tap Send; they arrive straightened and cleaned up. No phone? Use the webcam or photos you already have.</div></details>
+      <details class="tip"><summary>Make a scan searchable</summary><div class="muted"><b>Document → Scanned pages → Read this page.</b> The words are found on your computer and added to the saved PDF as invisible text, so you can search and copy them.</div></details>
+      <details class="tip"><summary>Check spelling</summary><div class="muted">Misspelled words in text you add get a red underline. <b>Document → Text &amp; spelling → Check spelling</b> lists them all with corrections, and you can add words to your own dictionary.</div></details>
+      <details class="tip"><summary>Arrange the window</summary><div class="muted">Drag the dividers beside the page to resize the panels, or keep going past the end to fold one away; double-click a divider to bring it back. Drag the dotted grip on the tool row to put the tools under the page. <b>Reset layout</b> is in Document → Settings.</div></details>
+      <details class="tip"><summary>Your work is kept as you go</summary><div class="muted">A working copy of the open document is stored in this browser on this computer, so a crash or a closed window does not lose it. Reopen KAM PDFs and it offers your last session back. Nothing is uploaded. Turn it off in Document → Settings.</div></details>
+      <details class="tip"><summary>Updates</summary><div class="muted">When you are online, KAM PDFs checks now and then for a newer version and offers it in a green bar. <b>Update now</b> installs it and restarts, keeping a working copy first. Only the version number is ever asked for.</div></details>
+      <details class="tip"><summary>Password-protected PDFs</summary><div class="muted">These cannot be opened yet. Open the file in another viewer and use Print to PDF to make an unlocked copy, then open that.</div></details>
     </div>
   </aside>
 </div>
@@ -453,6 +648,14 @@ kbd{background:var(--kbd);border:1px solid var(--border);border-radius:4px;paddi
 <input type="file" id="imgInput" accept="image/*" multiple hidden>
 <input type="file" id="imgAnnotInput" accept="image/*" hidden>
 <input type="file" id="scanPhotoInput" accept="image/*" multiple hidden>
+<input type="file" id="taskCombineInput" accept="application/pdf,.pdf" multiple hidden>
+<div id="palette" role="dialog" aria-modal="true" aria-label="Find a command" hidden>
+  <div class="palette-box">
+    <div class="palette-field"><svg class="ic" aria-hidden="true"><use href="#i-search"/></svg><input id="paletteInput" placeholder="What do you want to do? Try: sign, rotate, watermark…" autocomplete="off" spellcheck="false" role="combobox" aria-expanded="true" aria-controls="paletteList" aria-autocomplete="list"><kbd>Esc</kbd></div>
+    <div id="paletteList" role="listbox" aria-label="Commands"></div>
+    <div class="palette-foot muted">Arrow keys to move · Enter to run · Esc to close</div>
+  </div>
+</div>
 <script src="core.js"></script>
 <script src="annot.js"></script>
 <script src="ops.js"></script>
@@ -469,6 +672,8 @@ kbd{background:var(--kbd);border:1px solid var(--border);border-radius:4px;paddi
 <script src="layers.js"></script>
 <script src="autosave.js"></script>
 <script src="panels.js"></script>
+<script src="ux.js"></script>
+<script src="palette.js"></script>
 <script src="scan-desktop.js"></script>
 <script>
 if ("serviceWorker" in navigator && location.protocol.startsWith("http")) {

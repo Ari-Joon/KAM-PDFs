@@ -717,6 +717,8 @@ const barShows = `(() => { const u = document.getElementById('updateBar');
 
 test('a newer version is noticed and offered in the bar', async b => {
   await b.reload();
+  await b.evaluate(makeDoc(`doc.addPage([420, 300]);`));
+  await b.waitFor(settled);
 
   // 1.10.0 is older than 1.9.0 if you compare the strings, which is the usual way to get this wrong
   eq(await b.evaluate(`[versionIsNewer('1.10.0','1.9.0'), versionIsNewer('1.9.0','1.10.0'),
@@ -861,6 +863,8 @@ test('the side panels can be dragged, collapsed and put back', async b => {
   // sizes survive the window closing
   await b.evaluate(`KamPanels.set('sidebar', 300, false)`);
   await b.reload();
+  await b.evaluate(makeDoc(`doc.addPage([420, 300]);`));
+  await b.waitFor(settled);
   await b.waitFor(`document.getElementById('sidebar').offsetWidth === 300`, 5000);
   eq(await widthOf('sidebar'), 300, 'the width came back after a reload');
   await b.evaluate(`KamPanels.reset()`);
@@ -893,7 +897,8 @@ test('the tool row can be moved below the page', async b => {
   eq(await b.evaluate(`localStorage.getItem('kam-toolbar-dock')`), 'bottom', 'and that was remembered');
 
   await b.reload();
-  await b.waitFor(settled + ` || true`);
+  await b.evaluate(makeDoc(`doc.addPage([420, 300]);`));
+  await b.waitFor(settled);
   eq(await b.evaluate(order), 'below', 'still below after a reload');
   await b.evaluate(`KamPanels.reset()`);
   eq(await b.evaluate(order), 'above', 'Reset layout puts everything back');
@@ -911,6 +916,9 @@ test('the buttons use the drawn icon set, not emoji', async b => {
     if (emoji.test(label)) offenders.push(label.trim().slice(0, 30));
   }
   eq(offenders, [], 'these buttons still carry an emoji');
+  const layersJs = fs.readFileSync(path.join(ROOT, 'layers.js'), 'utf8');
+  eq((layersJs.match(emoji) || [null])[0], null, 'the Layers rows still draw an emoji');
+  ok(!/[\u25B2\u25BC\u25C9\u25CC]/u.test(layersJs), 'the Layers rows still use triangle or circle glyphs');
 
   // every icon a button asks for has to exist, or it renders as nothing at all
   const defined = new Set([...html.matchAll(/<symbol id="(i-[\w-]+)"/g)].map(x => x[1]));
@@ -918,10 +926,13 @@ test('the buttons use the drawn icon set, not emoji', async b => {
   eq(used.filter(u => !defined.has(u)), [], 'icons used but never drawn');
   ok(used.length >= 20, `expected a full icon set, found ${used.length}`);
 
-  // and they should actually paint: an icon with no size is an icon nobody sees
+  // and they should actually paint: an icon with no size is an icon nobody sees. The tools only
+  // appear once a document is open, and icons inside a closed menu are rightly not drawn.
   await b.reload();
+  await b.evaluate(makeDoc(`doc.addPage([420, 300]);`));
+  await b.waitFor(settled);
   const box = JSON.parse(await b.evaluate(`(() => {
-    const ics = [...document.querySelectorAll('#tools .ic')];
+    const ics = [...document.querySelectorAll('#tools .ic')].filter(i => !i.closest('.menu'));
     const bad = ics.filter(i => i.getBoundingClientRect().width < 8 || i.getBoundingClientRect().height < 8);
     return JSON.stringify({ count: ics.length, bad: bad.length,
       stroke: ics.length ? getComputedStyle(ics[0]).stroke : '' });
@@ -929,6 +940,181 @@ test('the buttons use the drawn icon set, not emoji', async b => {
   ok(box.count >= 10, `expected icons in the tool row, found ${box.count}`);
   eq(box.bad, 0, 'some tool icons render with no size');
   ok(box.stroke && box.stroke !== 'none', 'tool icons should take the button colour');
+});
+
+test('with nothing open, only what you can do is on screen', async b => {
+  await b.reload();
+  const seen = sel => `(() => { const e = document.querySelector('${sel}'); return !!e && e.offsetWidth > 0 && e.offsetHeight > 0; })()`;
+  eq(await b.evaluate(`document.body.classList.contains('no-doc')`), true, 'the app starts in its no-document state');
+  for (const sel of ['#toolbar', '#sidebar', '#rightpanel', '#pager', '#btnSave', '#btnUndo'])
+    eq(await b.evaluate(seen(sel)), false, `${sel} should wait until a document is open`);
+  for (const sel of ['#btnOpen2', '#taskCombine', '#taskImages', '#btnScan2', '#btnFile', '#btnCommand'])
+    eq(await b.evaluate(seen(sel)), true, `${sel} should be offered on the welcome screen`);
+  eq(await b.evaluate(`['btnMerge', 'btnSaveAs', 'btnPng', 'btnPrint'].map(id => document.getElementById(id).disabled)`),
+    [true, true, true, true], 'File menu items that need a document are disabled rather than silently doing nothing');
+
+  // help is still reachable with nothing open
+  await b.evaluate(`document.getElementById('btnHelpEmpty').click(); 1`);
+  eq(await b.evaluate(seen('#tab-help')), true, 'Help opens without a document');
+
+  await b.evaluate(makeDoc(`doc.addPage([420, 300]);`));
+  await b.waitFor(settled);
+  eq(await b.evaluate(`document.body.classList.contains('no-doc')`), false, 'opening a document leaves the welcome state');
+  for (const sel of ['#toolbar', '#sidebar', '#rightpanel', '#pager', '#btnSave'])
+    eq(await b.evaluate(seen(sel)), true, `${sel} appears once a document is open`);
+  eq(await b.evaluate(`document.getElementById('btnMerge').disabled`), false, 'and the menu items come alive');
+});
+
+test('the Combine card joins several PDFs into one', async b => {
+  await b.reload();
+  // the card hands the chosen files to the same path a drop uses, which works with nothing open
+  const pages = await b.evaluate(`(async () => {
+    const { PDFDocument } = PDFLib;
+    const mk = async n => { const d = await PDFDocument.create(); for (let i = 0; i < n; i++) d.addPage([300, 200]);
+      return new File([await d.save()], 'part' + n + '.pdf', { type: 'application/pdf' }); };
+    await handleDroppedFiles([await mk(2), await mk(3)]);
+    return state.pageIds.length; })()`);
+  eq(pages, 5, 'a 2-page and a 3-page PDF combine into 5 pages');
+});
+
+test('any command can be found by typing its name', async b => {
+  await b.reload();
+  eq(await b.evaluate(`KamPalette.audit()`), [], 'commands pointing at controls that do not exist');
+
+  const isOpen = `!document.getElementById('palette').hidden`;
+  const type = q => `(() => { const i = document.getElementById('paletteInput'); i.value = ${JSON.stringify(q)};
+    i.dispatchEvent(new Event('input', { bubbles: true })); return 1; })()`;
+  const press = k => `(() => { document.getElementById('paletteInput').dispatchEvent(new KeyboardEvent('keydown', { key: '${k}', bubbles: true })); return 1; })()`;
+  const top = `(() => { const r = document.querySelector('#paletteList .pal-item.on');
+    return r ? { label: r.querySelector('.pal-label').textContent, disabled: r.getAttribute('aria-disabled') } : null; })()`;
+
+  await b.evaluate(`document.activeElement.blur(); document.dispatchEvent(new KeyboardEvent('keydown', { key: 'k', ctrlKey: true, bubbles: true })); 1`);
+  eq(await b.evaluate(isOpen), true, 'Ctrl+K opens the command search');
+  eq(await b.evaluate(`document.activeElement.id`), 'paletteInput', 'with the cursor already in it');
+
+  // with nothing open, document commands are still listed, marked, and do not run
+  await b.evaluate(type('watermark'));
+  const w0 = await b.evaluate(top);
+  ok(w0 && /watermark/i.test(w0.label), 'watermark is found: ' + JSON.stringify(w0));
+  eq(w0.disabled, 'true', 'but marked as needing a document');
+  await b.evaluate(press('Escape'));
+  eq(await b.evaluate(isOpen), false, 'Escape closes it');
+
+  await b.evaluate(makeDoc(`doc.addPage([420, 300]);`));
+  await b.waitFor(settled);
+
+  // a word that is not in the label still finds the command: circle means the ellipse tool
+  await b.evaluate(`KamPalette.open(); 1`);
+  await b.evaluate(type('circle'));
+  eq((await b.evaluate(top)).label, 'Ellipse', 'typing circle finds the ellipse tool');
+  await b.evaluate(press('Enter'));
+  await b.waitFor(`state.tool === 'ellipse'`, 3000);
+  eq(await b.evaluate(isOpen), false, 'running a command closes the search');
+  eq(await b.evaluate(`document.getElementById('btnShapes').classList.contains('active')`), true, 'and the Shapes button shows a shape is in use');
+
+  // a command that lives in a folded section opens that section and puts you in the box
+  await b.evaluate(`document.querySelector('details.sec[data-sec="stamp"]').open = false; 1`);
+  await b.evaluate(`KamPalette.open(); 1`);
+  await b.evaluate(type('watermark'));
+  await b.evaluate(press('Enter'));
+  await b.waitFor(`document.activeElement && document.activeElement.id === 'wmText'`, 3000);
+  eq(await b.evaluate(`document.querySelector('details.sec[data-sec="stamp"]').open`), true, 'the watermark section was opened');
+
+  // arrow keys move through the matches
+  await b.evaluate(`KamPalette.open(); 1`);
+  await b.evaluate(type('rotate'));
+  const r1 = (await b.evaluate(top)).label;
+  await b.evaluate(press('ArrowDown'));
+  const r2 = (await b.evaluate(top)).label;
+  ok(/rotate/i.test(r1) && /rotate/i.test(r2) && r1 !== r2, `arrow down moves to the next match: ${r1}, then ${r2}`);
+  eq(await b.evaluate(`KamPalette.results('zzqx')`), [], 'nonsense finds nothing');
+  await b.evaluate(`KamPalette.close(); 1`);
+});
+
+test('the File and Shapes menus open, choose, and get out of the way', async b => {
+  await b.reload();
+  await b.evaluate(makeDoc(`doc.addPage([420, 300]);`));
+  await b.waitFor(settled);
+  const shown = id => `(() => { const e = document.getElementById('${id}'); return !e.hidden && e.offsetHeight > 0; })()`;
+
+  await b.evaluate(`document.getElementById('btnFile').click(); 1`);
+  eq(await b.evaluate(shown('fileMenu')), true, 'File opens its menu');
+  eq(await b.evaluate(`document.getElementById('btnFile').getAttribute('aria-expanded')`), 'true', 'and says so to screen readers');
+  await b.evaluate(`document.body.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true })); 1`);
+  eq(await b.evaluate(shown('fileMenu')), false, 'clicking elsewhere closes it');
+
+  // Escape closes a menu without also throwing away the tool you had
+  await b.evaluate(`setTool('pen'); document.getElementById('btnShapes').click(); 1`);
+  eq(await b.evaluate(shown('shapeMenu')), true, 'Shapes opens its menu');
+  await b.evaluate(`document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); 1`);
+  eq(await b.evaluate(shown('shapeMenu')), false, 'Escape closes it');
+  eq(await b.evaluate(`state.tool`), 'pen', 'and the pen is still the tool');
+
+  // choosing a shape picks the tool, closes the menu, and the button takes that shape's icon
+  await b.evaluate(`document.getElementById('btnShapes').click(); document.querySelector('#shapeMenu [data-tool="arrow"]').click(); 1`);
+  eq(await b.evaluate(`state.tool`), 'arrow', 'the arrow tool is chosen');
+  eq(await b.evaluate(shown('shapeMenu')), false, 'the menu closed behind it');
+  eq(await b.evaluate(`document.querySelector('#shapesIcon use').getAttribute('href')`), '#i-arrow', 'the button shows the arrow');
+  eq(await b.evaluate(`document.getElementById('btnShapes').classList.contains('active')`), true, 'and is lit as the active tool');
+
+  // the keyboard shortcut does the same, and a tool that is not a shape turns the button off
+  await b.evaluate(`document.dispatchEvent(new KeyboardEvent('keydown', { key: 'e', bubbles: true })); 1`);
+  eq(await b.evaluate(`document.querySelector('#shapesIcon use').getAttribute('href')`), '#i-ellipse', 'E switches the Shapes button to the ellipse');
+  await b.evaluate(`setTool('text'); 1`);
+  eq(await b.evaluate(`document.getElementById('btnShapes').classList.contains('active')`), false, 'another tool turns Shapes off');
+});
+
+test('document options fold into sections, and unsaved work is marked', async b => {
+  await b.reload();
+  await b.evaluate(`Object.keys(localStorage).filter(k => k.startsWith('kam-sec-')).forEach(k => localStorage.removeItem(k)); 1`);
+  await b.reload();
+  await b.evaluate(makeDoc(`doc.addPage([420, 300]);`));
+  await b.waitFor(settled);
+  const openSecs = `[...document.querySelectorAll('details.sec')].filter(d => d.open).map(d => d.dataset.sec)`;
+  eq(await b.evaluate(`document.querySelectorAll('details.sec').length`), 6, 'six sections instead of one long page');
+  eq(await b.evaluate(openSecs), ['export'], 'only Save & export starts open');
+
+  // a section you open stays open
+  await b.evaluate(`document.querySelector('details.sec[data-sec="details"]').open = true; 1`);
+  await b.waitFor(`localStorage.getItem('kam-sec-details') === '1'`, 3000);
+  await b.reload();
+  await b.evaluate(makeDoc(`doc.addPage([420, 300]);`));
+  await b.waitFor(settled);
+  eq(await b.evaluate(openSecs), ['export', 'details'], 'the section you opened is still open after a reload');
+
+  // unsaved changes show on the Save button and in the window title
+  const look = `({ dot: document.getElementById('btnSave').classList.contains('dirty'), title: document.title })`;
+  let d = await b.evaluate(look);
+  eq(d.dot, false, 'nothing to save yet');
+  eq(d.title, 'test.pdf - KAM PDFs', 'the title names the file');
+  await b.evaluate(`(() => { pushAnnotUndo(state.pageIds[0]);
+    curAnnots().push({ id: uid(), type: 'rect', x: 20, y: 20, w: 40, h: 30, rot: 0, stroke: '#000000', fill: null, width: 2, opacity: 1 });
+    drawOverlay(); return 1; })()`);
+  d = await b.evaluate(look);
+  eq(d.dot, true, 'a change puts a dot on Save');
+  ok(d.title.startsWith('• '), 'and in the window title: ' + d.title);
+  // saving is what clears the flag; this checks the screen follows the flag, not the download
+  await b.evaluate(`state.dirty = false; 1`);
+  d = await b.evaluate(look);
+  eq(d.dot, false, 'when the work is saved, the dot goes');
+  ok(!d.title.startsWith('• '), 'from the title too');
+});
+
+test('a first tip appears once, and then stays gone', async b => {
+  await b.reload();
+  await b.evaluate(`localStorage.removeItem('kam-coach-seen'); 1`);
+  await b.reload();
+  eq(await b.evaluate(`document.getElementById('coach').hidden`), true, 'no tip before a document is open');
+  await b.evaluate(makeDoc(`doc.addPage([420, 300]);`));
+  await b.waitFor(settled);
+  eq(await b.evaluate(`!document.getElementById('coach').hidden && document.getElementById('coach').offsetHeight > 0`), true,
+    'the tip shows with the first document');
+  await b.evaluate(`document.getElementById('coachClose').click(); 1`);
+  eq(await b.evaluate(`document.getElementById('coach').hidden`), true, 'Got it hides it');
+  await b.reload();
+  await b.evaluate(makeDoc(`doc.addPage([420, 300]);`));
+  await b.waitFor(settled);
+  eq(await b.evaluate(`document.getElementById('coach').hidden`), true, 'and it does not come back');
 });
 
 test('the released version number is stated in one place only', async () => {

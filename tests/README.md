@@ -41,7 +41,13 @@ anything fails, so it works as a pre-commit or CI check.
 | the version number | core.js, version.json and the service worker cache name all agree |
 | movable panels | a dragged divider actually moves the panel, collapses it, restores it, answers the keyboard, and is remembered across a reload |
 | the tool row | dragging its grip into the lower half moves the tools below the page, and that survives a reload |
-| the icon set | no button is left carrying an emoji, every icon a button asks for exists, and they render with a real size and the button's colour |
+| the icon set | no button or Layers row is left carrying an emoji, every icon a button asks for exists, and they render with a real size and the button's colour |
+| the welcome screen | with nothing open, tools and panels are off screen and the four task cards are on it; document-only menu items are disabled; Help is still reachable; opening a document brings everything back |
+| combining PDFs | the Combine card's path joins a 2-page and a 3-page PDF into 5 pages |
+| the command search | Ctrl+K opens it with the cursor in it; every command points at a control that exists; "circle" finds the ellipse tool; a command in a folded section opens it and puts you in the box; document commands are marked, not run, with nothing open |
+| the menus | File and Shapes open and close, clicking elsewhere closes them, Escape closes a menu without changing your tool, and the Shapes button follows the shape in use |
+| sections and unsaved work | six Document sections, only Save & export open at first, the ones you open are remembered, and unsaved changes put a dot on Save and in the window title |
+| the first tip | it appears with the first document and never again once dismissed |
 
 ## Why a second engine
 
@@ -74,6 +80,9 @@ Without them that one assertion is skipped and reported as skipped, not silently
   feature wrote the new width to storage while the panel stayed exactly where it was, because
   a flex child was being sized from two places at once; a test that checked the stored value
   would have passed the whole time.
+- The command search is audited, not sampled: `KamPalette.audit()` checks that every one of its
+  commands still points at a control that exists. Moving a button into a menu is exactly the kind of
+  change that leaves a command quietly doing nothing.
 - The version test is the one that stops a release going out silently: if `version.json` is not
   bumped alongside `core.js`, nobody already running the app is ever told the release exists.
 - The restore test waits for the marks to come back, not just for the document to open: the

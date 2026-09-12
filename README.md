@@ -14,7 +14,7 @@
   <a href="#how-it-works">How it works</a>
 </p>
 
-![KAM PDFs editing a real document](screenshots/york-text.png)
+![KAM PDFs editing a document](screenshots/editor.png)
 
 ## Why this exists
 
@@ -51,6 +51,13 @@ Open **https://ari-joon.github.io/KAM-PDFs/** in Chrome or Edge and click **⬇ 
 Unzip and open `index.html` in Chrome, Edge, Firefox, or Safari. Everything works the same. You can also use it straight from the browser at the link above.
 
 ## What it does
+
+**Easy to find your way around**
+- Opens to a simple question, *what would you like to do?*, with four answers: edit or sign a PDF, combine PDFs, turn photos into a PDF, or scan a document. Nothing else is on screen until there is a document to work on
+- Press **Ctrl+K** and type what you want, like *watermark*, *rotate* or *sign*, and press Enter. Every command is in there, so you never have to know where something lives
+- Rarely used actions sit in the **File** menu; the four shapes share one **Shapes** button; zoom and page controls live in a status bar under the page
+- The Document tab folds into sections (Save & export, Stamp every page, Scanned pages, Text & spelling, Document details, Settings) and remembers which ones you keep open
+- A dot on **Save PDF** and in the window title tells you there are unsaved changes
 
 **Pages**
 - Open, view, zoom, and jump between pages
@@ -120,9 +127,13 @@ Unzip and open `index.html` in Chrome, Edge, Firefox, or Safari. Everything work
 
 ## Screenshots
 
-**Welcome screen.** Open a file, start a blank one, or scan a document.
+**Welcome screen.** It asks what you want to do, and shows nothing else until there is a document to work on.
 
 ![Welcome screen](screenshots/welcome.png)
+
+**Find any command.** Press Ctrl+K and type. You never need to know where something lives.
+
+![Command search](screenshots/command-search.png)
 
 **Editing existing text.** Double-click a line already in the PDF and it becomes editable in place. Here the red total has been picked up with its own colour, size and typeface.
 
@@ -179,6 +190,7 @@ Phone scanner page: https://ari-joon.github.io/KAM-PDFs/scan.html
 | `Ctrl+Z` / `Ctrl+Y` | Undo / redo |
 | `Ctrl+C` `Ctrl+V` `Ctrl+D` | Copy, paste, duplicate the selected annotation |
 | Arrow keys | Nudge the selected annotation (Shift for 10x) |
+| `Ctrl+K` | Find any command by typing its name |
 | `Ctrl+F` | Find in document (Enter / Shift+Enter to step) |
 | `X` | Redact tool |
 | Double-click | Edit the text under the cursor, or type where there is none |
@@ -207,6 +219,8 @@ ocr-ui.js               the OCR buttons and the invisible text layer
 layers.js               the Layers panel
 autosave.js             the working copy kept in this browser's storage
 panels.js               dividers you can drag, and the tool row's position
+ux.js                   what is on screen when: the welcome screen, menus, sections, the unsaved dot
+palette.js              Ctrl+K: find any command by typing its name
 logo-mark.svg           the logo with the wordmark dropped, for small sizes
 setup/build-icons.js    redraws every icon and the .ico from the two SVGs
 version.json            the version this site is serving, which is how installed copies
@@ -238,9 +252,9 @@ Install KAM PDFs.bat    double-click installer (Windows)
 node tests/run.js
 ```
 
-Twenty-five tests covering page operations, annotation fidelity, form fields, text editing,
+Thirty-one tests covering page operations, annotation fidelity, form fields, text editing,
 selection, find, spell checking, redaction, OCR, layers, the working copy, undo and the
-scanner, the movable panels, the icon set and the update check. Needs Node 18+ and
+scanner, the movable panels, the icon set, the welcome screen, the menus, the command search and the update check. Needs Node 18+ and
 Chrome; nothing to install. See [tests/README.md](tests/README.md) for what each one checks
 and why one of them deliberately uses a second rendering engine.
 
