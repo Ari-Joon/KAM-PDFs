@@ -1,5 +1,5 @@
 {
-  "version": "1.15.1",
-  "notes": "search highlights land on the right letters, and the last emoji buttons are drawn icons",
+  "version": "1.16.0",
+  "notes": "an update button of its own, and a check that keeps running while the app stays open",
   "url": "https://github.com/Ari-Joon/KAM-PDFs/releases/latest"
 }

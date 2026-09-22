@@ -39,6 +39,9 @@ anything fails, so it works as a pre-commit or CI check.
 | scanner | page corners found in a photograph |
 | the update check | a newer version raises the green bar, "Not now" is remembered for that version only, and GitHub answers when the site's own file cannot |
 | updating | the offline copy is cleared and the app restarts, so the reload really gets the new files |
+| the update button | it is always in the top bar, quiet until a newer version exists, then gold and naming it; it outlasts "Not now" and brings the bar back |
+| checking while open | a window left open still asks after six hours, and does not ask sooner |
+| a copy in a folder | is handed the Windows zip of the new release rather than a page to go looking on |
 | the version number | core.js, version.json and the service worker cache name all agree |
 | movable panels | a dragged divider actually moves the panel, collapses it, restores it, answers the keyboard, and is remembered across a reload |
 | the tool row | dragging its grip into the lower half moves the tools below the page, and that survives a reload |

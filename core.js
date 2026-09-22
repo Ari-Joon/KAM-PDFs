@@ -5,7 +5,7 @@ pdfjsLib.GlobalWorkerOptions.workerSrc = 'lib/pdf.worker.min.js';
 
 /* Bumped with each release, and shown in the Help tab. Because it lives in the code that
    is actually running, it tells you which version you have rather than which is newest. */
-const KAM_VERSION = '1.15.1';
+const KAM_VERSION = '1.16.0';
 
 const $ = s => document.querySelector(s);
 const $$ = s => [...document.querySelectorAll(s)];
@@ -278,6 +278,26 @@ let pendingUpdate = null;
 
 function showVersion() {
   const el = $('#appVersion'); if (el) el.textContent = 'v' + KAM_VERSION;
+  setUpdateButton('idle');
+}
+
+/* The update button in the top bar: a quiet arrow that checks when clicked, spinning while
+   it does, which turns into a gold "Update to x.y.z" once a newer version exists. It stays
+   gold after "Not now", so the update is always one click away without the bar nagging. */
+let updateLabelTimer = null;
+function setUpdateButton(stateName, text) {
+  const b = $('#btnUpdates'); if (!b) return;
+  clearTimeout(updateLabelTimer);
+  b.classList.toggle('checking', stateName === 'checking');
+  b.classList.toggle('available', stateName === 'available');
+  const label = b.querySelector('.upd-label');
+  label.textContent = stateName === 'available' ? 'Update to ' + pendingUpdate.version
+    : stateName === 'updating' ? 'Updating…' : (text || '');
+  const tip = stateName === 'available' ? 'KAM PDFs ' + pendingUpdate.version + ' is available — click for details'
+    : 'Check for updates. You have v' + KAM_VERSION + '.';
+  b.title = tip; b.setAttribute('aria-label', tip);
+  // An answer to a check you asked for stands for a moment, then the quiet icon comes back.
+  if (stateName === 'said') updateLabelTimer = setTimeout(() => setUpdateButton(pendingUpdate ? 'available' : 'idle'), 4000);
 }
 // 1.10.0 is older than 1.9.0 if you compare as text, so compare number by number.
 function versionIsNewer(a, b) {
@@ -308,11 +328,15 @@ async function latestRelease() {
   const j = await r.json();
   const v = String(j.tag_name || '').replace(/^v/i, '');
   if (!v) throw new Error('no version in the reply');
-  return { version: v, notes: String(j.name || '').replace(/^KAM PDFs v[\d.]+\s*-\s*/i, ''), url: j.html_url || KAM_RELEASES };
+  // The Windows zip, so a copy that lives in a folder can fetch it in one click.
+  const zip = (j.assets || []).find(a => /-windows\.zip$/i.test(a.name || ''));
+  return { version: v, notes: String(j.name || '').replace(/^KAM PDFs v[\d.]+\s*-\s*/i, ''), url: j.html_url || KAM_RELEASES,
+           download: zip ? zip.browser_download_url : null };
 }
 
 function showUpdateBar(info) {
   pendingUpdate = info;
+  setUpdateButton('available');
   const bar = $('#updateBar'); if (!bar) return;
   $('#updateMsg').textContent = 'KAM PDFs ' + info.version + ' is available'
     + (info.notes ? ' — ' + info.notes : '') + '. It is free, as always.';
@@ -326,33 +350,69 @@ function hideUpdateBar() { const b = $('#updateBar'); if (b) b.hidden = true; }
 async function checkForUpdate(auto) {
   const btn = $('#btnUpdate');
   if (!auto && btn) { btn.disabled = true; btn.textContent = 'Checking…'; }
+  if (!auto) setUpdateButton('checking');
   try {
-    if (!navigator.onLine) { if (!auto) toast('You are offline, so there is nothing to check against yet.', 4000); return; }
+    if (!navigator.onLine) {
+      if (!auto) { toast('You are offline, so there is nothing to check against yet.', 4000); setUpdateButton('said', 'Offline'); }
+      return;
+    }
     const info = await latestRelease();
     try { localStorage.setItem('kam-update-checked', String(Date.now())); } catch (e) { }
     if (versionIsNewer(info.version, KAM_VERSION)) {
       let skipped = null; try { skipped = localStorage.getItem('kam-skip-version'); } catch (e) { }
-      if (auto && skipped === info.version) return;   // they said not now, and nothing newer has landed since
+      if (auto && skipped === info.version) {
+        // They said not now: no bar, but the button still says there is something to get.
+        pendingUpdate = info;
+        setUpdateButton('available');
+        return;
+      }
       showUpdateBar(info);
     } else {
+      pendingUpdate = null;
       hideUpdateBar();
-      if (!auto) toast('You are on the latest version (v' + KAM_VERSION + ').', 4000);
+      if (!auto) { toast('You are on the latest version (v' + KAM_VERSION + ').', 4000); setUpdateButton('said', 'Up to date'); }
+      else setUpdateButton('idle');
     }
   } catch (e) {
     console.warn('update check failed', e);
-    if (!auto) toast('Could not check for updates: ' + e.message, 5000);
+    if (!auto) { toast('Could not check for updates: ' + e.message, 5000); setUpdateButton('said', "Couldn't check"); }
   } finally {
     if (!auto && btn) { btn.disabled = false; btn.textContent = 'Check for updates'; }
   }
+}
+
+// The button: with a version waiting it brings the bar back, even after "Not now";
+// otherwise it checks there and then.
+function onUpdateButton() {
+  if (pendingUpdate) showUpdateBar(pendingUpdate);
+  else checkForUpdate(false);
+}
+
+// Where this copy lives, for a copy running from a folder: "C:\Users\me\Documents\KAM PDFs".
+function folderOfThisCopy() {
+  if (location.protocol !== 'file:') return '';
+  const p = decodeURIComponent(location.pathname).replace(/^\/([A-Za-z]:)/, '$1').replace(/\/[^/]*$/, '');
+  return navigator.platform && /win/i.test(navigator.platform) ? p.replace(/\//g, '\\') : p;
 }
 
 async function applyUpdate() {
   const b = $('#btnUpdateNow');
   const url = (pendingUpdate && pendingUpdate.url) || KAM_RELEASES;
   if (!canReplaceItself()) {
-    // Running from a folder on disk: it cannot rewrite its own files, so send them to the download.
-    window.open(url, '_blank', 'noopener');
-    toast('Download the new zip and unzip it over your KAM PDFs folder. Your settings and working copy are kept.', 9000);
+    // Running from a folder on disk: a web page cannot rewrite its own files, so fetch the new
+    // zip for them in one click, and say exactly where it goes.
+    const zip = pendingUpdate && pendingUpdate.download;
+    if (zip) {
+      const a = document.createElement('a');
+      a.href = zip; a.rel = 'noopener'; document.body.appendChild(a); a.click(); a.remove();
+    } else {
+      window.open(url, '_blank', 'noopener');
+    }
+    const here = folderOfThisCopy();
+    toast((zip ? 'Downloading KAM PDFs ' + pendingUpdate.version + '. ' : 'Download the new zip, then ')
+      + 'Unzip it where you unzipped this one and let it replace the files'
+      + (here ? ' (this copy is in ' + here + ')' : '')
+      + '. Your settings and working copy are kept.', 12000);
     return;
   }
   if (!navigator.onLine) { toast('You are offline. Reconnect and try again.', 4000); return; }
@@ -363,6 +423,7 @@ async function applyUpdate() {
     if (!kept && !confirm('Updating reloads KAM PDFs, and this document has changes that are not saved.\n\nSave the PDF first, or press OK to update anyway.')) return;
   }
   if (b) { b.disabled = true; b.textContent = 'Updating…'; }
+  setUpdateButton('updating');
   try {
     const reg = await navigator.serviceWorker.getRegistration();
     if (reg) {
@@ -376,13 +437,14 @@ async function applyUpdate() {
     console.error(e);
     toast('Could not update: ' + e.message + '. You can download it instead.', 6000);
     if (b) { b.disabled = false; b.textContent = 'Update now'; }
+    setUpdateButton('available');
   }
 }
 
 function laterOnUpdate() {
   if (pendingUpdate) { try { localStorage.setItem('kam-skip-version', pendingUpdate.version); } catch (e) { } }
   hideUpdateBar();
-  toast('Hidden until the next version. "Check for updates" in the Document tab brings it back.', 5000);
+  toast('Hidden until the next version. The gold update button at the top brings it back.', 5000);
 }
 
 function maybeAutoCheck() {
@@ -394,12 +456,16 @@ function maybeAutoCheck() {
 
 showVersion();
 $('#btnUpdate').onclick = () => checkForUpdate(false);
+$('#btnUpdates').onclick = onUpdateButton;
 $('#btnUpdateNow').onclick = applyUpdate;
 $('#btnUpdateLater').onclick = laterOnUpdate;
 // Let the app finish opening before going near the network.
 setTimeout(maybeAutoCheck, 4000);
 window.addEventListener('online', () => setTimeout(maybeAutoCheck, 2000));
 document.addEventListener('visibilitychange', () => { if (!document.hidden) maybeAutoCheck(); });
+// And keep asking while it stays open: a window left open all week still hears about a
+// release. maybeAutoCheck does nothing until six hours have passed since the last check.
+setInterval(maybeAutoCheck, 15 * 60 * 1000);
 
 /* ---------- light / dark theme ---------- */
 function applyTheme(t) {

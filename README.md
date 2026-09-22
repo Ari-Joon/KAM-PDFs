@@ -120,10 +120,11 @@ Unzip and open `index.html` in Chrome, Edge, Firefox, or Safari. Everything work
 - Whatever you set is remembered on this computer. **Reset layout** in the Document tab puts it all back
 
 **Staying up to date**
-- If you're online, KAM PDFs checks whether a newer version exists and tells you in a green bar under the tools. It checks at most once every six hours, and never sends anything about you or your file
+- The circular arrow at the top right checks for a newer version whenever you click it. KAM PDFs also checks by itself when it opens, and keeps checking every six hours while it stays open, so a window left open all week still hears about a release. It never sends anything about you or your file
+- When there is one, the arrow becomes a gold **Update to x.y.z** button and a green bar under the tools says what changed
 - **Update now** in that bar does it there and then: the app fetches the new version and restarts itself. Anything open is kept in the working copy first, so you don't lose it
-- A copy you unzipped into a folder can't rewrite its own files, so the button takes you to the download instead
-- **Not now** hides the bar until there is a version newer still. "Check for updates" in the Document tab brings it back whenever you want
+- A copy you unzipped into a folder can't rewrite its own files, so the button downloads the new zip for you instead and says exactly where to unzip it
+- **Not now** hides the bar until there is a version newer still. The gold button stays, so the update is one click away whenever you want it
 
 ## Screenshots
 

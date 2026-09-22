@@ -70,6 +70,17 @@ input[type=range]{accent-color:var(--accent)}
 .group{display:flex;align-items:center;gap:6px}
 .group.right{margin-left:auto}
 #btnTheme{font-size:15px;padding:3px 9px}
+/* The update button: a quiet arrow until there is something to say, then a gold chip that
+   says it. It stays gold after "Not now", so the update is one click away without nagging. */
+#btnUpdates{padding:3px 9px;color:var(--muted)}
+#btnUpdates:hover{color:var(--text)}
+#btnUpdates .ic-get,#btnUpdates .upd-label:empty{display:none}
+#btnUpdates.checking .ic-check{animation:updSpin .9s linear infinite}
+@keyframes updSpin{to{transform:rotate(360deg)}}
+#btnUpdates.available{color:var(--accent);border-color:var(--accent);font-weight:600}
+#btnUpdates.available .ic-check{display:none}
+#btnUpdates.available .ic-get{display:block}
+@media (prefers-reduced-motion:reduce){#btnUpdates.checking .ic-check{animation:none}}
 #zoomLabel{min-width:44px;text-align:center;color:var(--muted);font-variant-numeric:tabular-nums}
 
 #main{display:flex;flex:1;min-height:0}
@@ -357,6 +368,7 @@ details.tip>div{padding:0 2px 11px;line-height:1.55}
 <symbol id="i-redo" viewBox="0 0 24 24"><path d="M20 9h-9a6 6 0 1 0 6 6"/><path d="M16 4.5 20.5 9 16 13.5"/></symbol>
 <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.5"/><path d="M15.8 15.8 21 21"/></symbol>
 <symbol id="i-download" viewBox="0 0 24 24"><path d="M12 3.5v11"/><path d="M7.5 10 12 14.5 16.5 10"/><path d="M4.5 20h15"/></symbol>
+<symbol id="i-update" viewBox="0 0 24 24"><path d="M20 11a8 8 0 0 0-14.3-4.9"/><path d="M5.5 3v3.6h3.6"/><path d="M4 13a8 8 0 0 0 14.3 4.9"/><path d="M18.5 21v-3.6h-3.6"/></symbol>
 <symbol id="i-print" viewBox="0 0 24 24"><path d="M7 8.5V3.5h10v5"/><path d="M5 8.5h14a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-1"/><path d="M6 17.5H5a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2"/><path d="M7 14h10v6.5H7z"/></symbol>
 <symbol id="i-app" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="4"/><path d="M12 8v7"/><path d="M9 12l3 3 3-3"/></symbol>
 <symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2.5v2.2M12 19.3v2.2M4.2 4.2l1.6 1.6M18.2 18.2l1.6 1.6M2.5 12h2.2M19.3 12h2.2M4.2 19.8l1.6-1.6M18.2 5.8l1.6-1.6"/></symbol>
@@ -423,6 +435,7 @@ details.tip>div{padding:0 2px 11px;line-height:1.55}
   <button id="btnCommand" title="Find any command by typing its name (Ctrl+K)"><svg class="ic" aria-hidden="true"><use href="#i-search"/></svg><span>Search commands, e.g. watermark, rotate…</span><kbd>Ctrl+K</kbd></button>
   <div class="group right">
     <button id="btnScan" title="Scan documents with your phone or webcam"><svg class="ic" aria-hidden="true"><use href="#i-camera"/></svg><span class="scan-label">Scan</span></button>
+    <button id="btnUpdates" title="Check for updates" aria-label="Check for updates"><svg class="ic ic-check" aria-hidden="true"><use href="#i-update"/></svg><svg class="ic ic-get" aria-hidden="true"><use href="#i-download"/></svg><span class="upd-label"></span></button>
     <button id="btnTheme" class="icon-btn" title="Switch light / dark mode" aria-label="Switch light or dark mode"><svg class="ic" aria-hidden="true"><use href="#i-sun"/></svg><svg class="ic" aria-hidden="true"><use href="#i-moon"/></svg></button>
     <button id="btnInstall" hidden title="Install KAM PDFs as an app with its own window and icon"><svg class="ic" aria-hidden="true"><use href="#i-app"/></svg> Install app</button>
     <button id="btnSave" class="primary doc-only" title="Save the PDF (Ctrl+S)"><svg class="ic" aria-hidden="true"><use href="#i-download"/></svg> Save PDF</button>

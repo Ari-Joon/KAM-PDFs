@@ -822,6 +822,83 @@ test('a newer version is noticed and offered in the bar', async b => {
   eq(gh.notes, 'a nice change', 'the release title is trimmed to what changed');
 });
 
+// The update button in the top bar, measured on screen like the bar is.
+const updateButton = `(() => { const u = document.getElementById('btnUpdates'), cs = getComputedStyle(u);
+  return JSON.stringify({ shows: u.offsetWidth > 0 && u.offsetHeight > 0 && cs.display !== 'none',
+    gold: u.classList.contains('available'), label: u.querySelector('.upd-label').textContent,
+    labelShows: u.querySelector('.upd-label').offsetWidth > 0, tip: u.title,
+    getIcon: u.querySelector('.ic-get').getBoundingClientRect().width > 0,
+    inTopBar: !!u.closest('#topbar') }); })()`;
+
+test('the update button is always there, and turns gold when a version is waiting', async b => {
+  await b.reload();
+  await b.evaluate(makeDoc(`doc.addPage([420, 300]);`));
+  await b.waitFor(settled);
+  const forget = `(() => { try { localStorage.removeItem('kam-skip-version'); localStorage.removeItem('kam-update-checked'); } catch (e) {} return 1; })()`;
+  await b.evaluate(forget);
+
+  // with nothing newer it is a quiet icon in the top bar, not a label
+  let u = JSON.parse(await b.evaluate(updateButton));
+  ok(u.shows && u.inTopBar, 'the update button is on screen, in the top bar');
+  ok(!u.gold && !u.labelShows, 'and quiet while there is nothing to get');
+  ok(u.tip.includes('Check for updates'), `it says what it does, said: ${u.tip}`);
+
+  // a check you asked for answers on the button itself
+  await b.evaluate(`checkForUpdate(false)`);
+  u = JSON.parse(await b.evaluate(updateButton));
+  eq(u.label, 'Up to date', 'a check against this very build says so');
+  ok(u.labelShows, 'and the answer is on screen');
+
+  // a newer version turns it gold and names it
+  await b.evaluate(`(() => { window.fetch = async x => (String(x).includes('version.json')
+      ? { ok: true, json: async () => ({ version: '9.9.9', notes: 'faster everything', url: 'https://example.invalid/rel' }) }
+      : { ok: false, status: 404 });
+    return 1; })()`);
+  await b.evaluate(forget);
+  await b.evaluate(`checkForUpdate(true)`);
+  u = JSON.parse(await b.evaluate(updateButton));
+  ok(u.gold, 'a waiting version turns the button gold');
+  eq(u.label, 'Update to 9.9.9', 'and it names the version');
+  ok(u.labelShows && u.getIcon, 'with the download arrow showing');
+  eq(await b.evaluate(barShows), true, 'and the bar is up as well');
+
+  // "Not now" puts the bar away but not the button, which brings it straight back
+  await b.evaluate(`document.getElementById('btnUpdateLater').click()`);
+  eq(await b.evaluate(barShows), false, 'Not now hides the bar');
+  ok(JSON.parse(await b.evaluate(updateButton)).gold, 'but the button stays gold');
+  await b.evaluate(`localStorage.removeItem('kam-update-checked'); checkForUpdate(true)`);
+  eq(await b.evaluate(barShows), false, 'a later automatic check does not bring the bar back for that version');
+  ok(JSON.parse(await b.evaluate(updateButton)).gold, 'and the button is still gold after it');
+  await b.evaluate(`document.getElementById('btnUpdates').click()`);
+  eq(await b.evaluate(barShows), true, 'clicking the button shows the bar again');
+});
+
+test('it keeps checking while it stays open, but not more than every six hours', async b => {
+  await b.reload();
+  await b.evaluate(`(() => { window.__asked = 0; window.fetch = async x => { window.__asked++;
+      return { ok: true, json: async () => ({ version: '1.0.0', notes: '', url: 'https://example.invalid' }) }; };
+    return 1; })()`);
+  await b.evaluate(`localStorage.setItem('kam-update-checked', String(Date.now() - 7 * 3600e3)); maybeAutoCheck(); 1`);
+  await b.waitFor(`window.__asked > 0`);
+  eq(await b.evaluate(`window.__asked`), 1, 'seven hours after the last check, it asks');
+  await b.evaluate(`window.__asked = 0; localStorage.setItem('kam-update-checked', String(Date.now() - 1 * 3600e3)); maybeAutoCheck(); 1`);
+  await sleep(300);
+  eq(await b.evaluate(`window.__asked`), 0, 'one hour after, it does not');
+});
+
+test('a copy in a folder is handed the zip for its release', async b => {
+  await b.reload();
+  await b.evaluate(`(() => { window.fetch = async x => (String(x).includes('api.github.com')
+      ? { ok: true, json: async () => ({ tag_name: 'v8.1.0', name: 'KAM PDFs v8.1.0 - a nice change',
+          html_url: 'https://example.invalid/gh', assets: [
+            { name: 'SHA256SUMS.txt', browser_download_url: 'https://example.invalid/sums' },
+            { name: 'KAM-PDFs-v8.1.0-windows.zip', browser_download_url: 'https://example.invalid/KAM-PDFs-v8.1.0-windows.zip' }] }) }
+      : { ok: false, status: 500 });
+    return 1; })()`);
+  const gh = JSON.parse(await b.evaluate(`latestRelease().then(r => JSON.stringify(r))`));
+  eq(gh.download, 'https://example.invalid/KAM-PDFs-v8.1.0-windows.zip', 'the Windows zip is picked out of the release');
+});
+
 test('updating clears the offline copy and reloads', async b => {
   await b.reload();
   await b.evaluate(`(() => { window.fetch = async u => (String(u).includes('version.json')
