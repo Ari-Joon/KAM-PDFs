@@ -873,17 +873,26 @@ test('the update button is always there, and turns gold when a version is waitin
   eq(await b.evaluate(barShows), true, 'clicking the button shows the bar again');
 });
 
-test('it keeps checking while it stays open, but not more than every six hours', async b => {
+test('it checks once when it opens, and not again while it stays open', async b => {
   await b.reload();
   await b.evaluate(`(() => { window.__asked = 0; window.fetch = async x => { window.__asked++;
       return { ok: true, json: async () => ({ version: '1.0.0', notes: '', url: 'https://example.invalid' }) }; };
     return 1; })()`);
-  await b.evaluate(`localStorage.setItem('kam-update-checked', String(Date.now() - 7 * 3600e3)); maybeAutoCheck(); 1`);
+  // a fresh launch, with no check in the last six hours
+  await b.evaluate(`checkedThisLaunch = false; localStorage.setItem('kam-update-checked', String(Date.now() - 7 * 3600e3)); maybeAutoCheck(); 1`);
   await b.waitFor(`window.__asked > 0`);
-  eq(await b.evaluate(`window.__asked`), 1, 'seven hours after the last check, it asks');
-  await b.evaluate(`window.__asked = 0; localStorage.setItem('kam-update-checked', String(Date.now() - 1 * 3600e3)); maybeAutoCheck(); 1`);
+  eq(await b.evaluate(`window.__asked`), 1, 'it asks once when it opens');
+  // nothing later in the same launch asks again: not coming back online, not any other nudge,
+  // however long ago the last check was
+  await b.evaluate(`localStorage.setItem('kam-update-checked', String(Date.now() - 7 * 3600e3));
+    maybeAutoCheck(); window.dispatchEvent(new Event('online')); 1`);
+  await sleep(2500);
+  eq(await b.evaluate(`window.__asked`), 1, 'and not again while it stays open');
+  // reopened soon after a launch that asked, it does not ask at all
+  await b.evaluate(`window.__asked = 0; checkedThisLaunch = false;
+    localStorage.setItem('kam-update-checked', String(Date.now() - 1 * 3600e3)); maybeAutoCheck(); 1`);
   await sleep(300);
-  eq(await b.evaluate(`window.__asked`), 0, 'one hour after, it does not');
+  eq(await b.evaluate(`window.__asked`), 0, 'reopened an hour after a check, it does not ask');
 });
 
 test('a copy in a folder is handed the zip for its release', async b => {

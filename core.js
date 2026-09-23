@@ -5,7 +5,7 @@ pdfjsLib.GlobalWorkerOptions.workerSrc = 'lib/pdf.worker.min.js';
 
 /* Bumped with each release, and shown in the Help tab. Because it lives in the code that
    is actually running, it tells you which version you have rather than which is newest. */
-const KAM_VERSION = '1.16.0';
+const KAM_VERSION = '1.16.1';
 
 const $ = s => document.querySelector(s);
 const $$ = s => [...document.querySelectorAll(s)];
@@ -447,8 +447,15 @@ function laterOnUpdate() {
   toast('Hidden until the next version. The gold update button at the top brings it back.', 5000);
 }
 
+/* One automatic check per launch, a few seconds after it opens, and never while it stays
+   open: an update matters, but not enough to keep going back to the network. Opened offline,
+   the one check waits for the connection. Reopening the app all day does not ask all day
+   either, because a check in the last six hours stands for this one. "Check for updates"
+   and the update button ask whenever they are clicked. */
+let checkedThisLaunch = false;
 function maybeAutoCheck() {
-  if (!navigator.onLine) return;
+  if (checkedThisLaunch || !navigator.onLine) return;
+  checkedThisLaunch = true;
   let last = 0; try { last = parseInt(localStorage.getItem('kam-update-checked'), 10) || 0; } catch (e) { }
   if (Date.now() - last < CHECK_EVERY) return;
   checkForUpdate(true);
@@ -461,11 +468,8 @@ $('#btnUpdateNow').onclick = applyUpdate;
 $('#btnUpdateLater').onclick = laterOnUpdate;
 // Let the app finish opening before going near the network.
 setTimeout(maybeAutoCheck, 4000);
+// Opened offline: the one check waits for the connection.
 window.addEventListener('online', () => setTimeout(maybeAutoCheck, 2000));
-document.addEventListener('visibilitychange', () => { if (!document.hidden) maybeAutoCheck(); });
-// And keep asking while it stays open: a window left open all week still hears about a
-// release. maybeAutoCheck does nothing until six hours have passed since the last check.
-setInterval(maybeAutoCheck, 15 * 60 * 1000);
 
 /* ---------- light / dark theme ---------- */
 function applyTheme(t) {

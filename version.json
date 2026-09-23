@@ -1,5 +1,5 @@
 {
-  "version": "1.16.0",
-  "notes": "an update button of its own, and a check that keeps running while the app stays open",
+  "version": "1.16.1",
+  "notes": "it checks for updates once when it opens, and not again while it stays open",
   "url": "https://github.com/Ari-Joon/KAM-PDFs/releases/latest"
 }
