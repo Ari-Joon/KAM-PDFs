@@ -324,27 +324,6 @@ $('#btnApplyForm').onclick = () => structOp(async () => {
 }, { clearThumbs: true });
 
 /* ---------- export: burn annotations into a copy ---------- */
-/* The built-in fonts cover WinAnsi only, but PDFs are full of curly quotes, real dashes and
-   ligatures. Map those to something the font can draw so saved text matches what you typed. */
-const NEAREST = {
-  '‘': "'", '’': "'", '‚': ',', '‛': "'", '′': "'", 'ʼ': "'", '´': "'",
-  '“': '"', '”': '"', '„': '"', '″': '"', '«': '"', '»': '"',
-  '‐': '-', '‑': '-', '‒': '-', '–': '-', '—': '-', '―': '-', '−': '-',
-  ' ': ' ', ' ': ' ', ' ': ' ', ' ': ' ', ' ': ' ', ' ': ' ', '　': ' ',
-  '​': '', '‌': '', '‍': '', '­': '', '﻿': '',
-  '…': '...', '•': '-', '·': '-', '⁃': '-', '●': '-', '▪': '-',
-  'ﬀ': 'ff', 'ﬁ': 'fi', 'ﬂ': 'fl', 'ﬃ': 'ffi', 'ﬄ': 'ffl', 'œ': 'oe', 'Œ': 'OE',
-  '⁄': '/', '∕': '/', '˜': '~', 'Ł': 'L', 'ł': 'l',
-};
-const NEAREST_RE = new RegExp('[' + Object.keys(NEAREST).join('') + ']', 'g');
-function sanitizeForFont(text, font) {
-  let out = '';
-  for (const ch of text.replace(NEAREST_RE, c => NEAREST[c])) {
-    if (ch === '\n') { out += ch; continue; }
-    try { font.encodeText(ch); out += ch; } catch (e) { out += '?'; }
-  }
-  return out;
-}
 /* Axis-aligned box for one of our annotations, in display points. */
 function annotBox(a) {
   if (a.pts) { const b = bounds(a); return { x: b.x, y: b.y, X: b.x + b.w, Y: b.y + b.h }; }
@@ -468,18 +447,37 @@ async function burnedDoc() {
     try { flat += flattenLeftoverWidgets(doc); } catch (e) { console.warn('leftover widgets not flattened', e); }
     if (flat && !$('#flattenForm').checked) toast('Form fields were merged into the page so your marks stay on top.', 5000);
   }
-  const fonts = {}, imgs = {};
+  const fonts = {}, imgs = {}, bundledFonts = {}, lost = new Set();
   const fontNames = { Helvetica: ['Helvetica', 'HelveticaBold'], TimesRoman: ['TimesRoman', 'TimesRomanBold'], Courier: ['Courier', 'CourierBold'] };
-  const getFont = async a => { const k = a.font + (a.bold ? 'B' : ''); if (!fonts[k]) fonts[k] = await doc.embedFont(StandardFonts[fontNames[a.font][a.bold ? 1 : 0]]); return fonts[k]; };
+  const stdFont = async a => { const k = a.font + (a.bold ? 'B' : ''); if (!fonts[k]) fonts[k] = await doc.embedFont(StandardFonts[fontNames[a.font][a.bold ? 1 : 0]]); return fonts[k]; };
+  const canWrite = (font, text) => { try { font.encodeText(text.replace(/\n/g, '')); return true; } catch (e) { return false; } };
+  /* The font for text of ours. A standard font when it can write every letter, which adds
+     nothing to the file; otherwise the bundled font of the same design and measurements, with
+     only the letters used (fonts.js). The standard fonts only know Western European letters,
+     so Polish, Czech, Greek or Russian used to come out of the saved file as question marks.
+     Letters no font here has at all are left out, and saving says which. */
+  async function fontFor(a, text) {
+    text = text.normalize('NFC').replace(/[\u200B-\u200F\u2060\uFEFF]/g, '');     // invisible marks no font draws
+    if (fontNames[a.font]) { const f = await stdFont(a); if (canWrite(f, text)) return { font: f, text }; }
+    const key = KamFonts.keyFor(a.font, a.bold);
+    if (!bundledFonts[key]) {
+      await KamFonts.ready(); doc.registerFontkit(window.fontkit);
+      const b = await KamFonts.bundled(key);
+      bundledFonts[key] = { pdf: await doc.embedFont(b.bytes, { subset: true, features: { liga: false } }), fk: b.fk };
+    }
+    const bf = bundledFonts[key], gone = KamFonts.missingFrom(bf.fk, text);
+    if (gone.length) { gone.forEach(c => lost.add(c)); text = [...text].filter(c => !gone.includes(c)).join(''); }
+    return { font: bf.pdf, text };
+  }
   const getImage = async a => { if (!imgs[a.src]) { const b = await (await fetch(a.src)).arrayBuffer(); imgs[a.src] = a.fmt === 'jpg' ? await doc.embedJpg(b) : await doc.embedPng(b); } return imgs[a.src]; };
   /* Words read off a scan go in as invisible text over the picture, which is what makes a
      scanned PDF searchable and selectable in any viewer. */
   async function addOcrLayer(page, i, toU, R) {
     const words = (typeof ocrWordsFor === 'function' ? ocrWordsFor(i) : []) || [];
     if (!words.length) return;
-    const font = await getFont({ font: 'Helvetica', bold: false });
     for (const w of words) {
-      const txt = sanitizeForFont(w.text, font).trim();
+      const { font, text } = await fontFor({ font: 'Helvetica', bold: false }, w.text);
+      const txt = text.trim();
       if (!txt) continue;
       let size = Math.max(1, w.h * 0.82);
       // keep the hidden word inside its box, so selecting it in a viewer lands where the
@@ -500,7 +498,6 @@ async function burnedDoc() {
     if (!runs || !runs.length) return;
     const boxes = (state.annots[state.pageIds[i]] || [])
       .filter(a => a.redact && !a.hidden).map(annotBox);
-    const font = await getFont({ font: 'Helvetica', bold: false });
     const clear = (x0, x1, y0, y1) => !boxes.some(b => x0 < b.X + 1 && x1 > b.x - 1 && y0 < b.Y + 1 && y1 > b.y - 1);
     for (const r of runs) {
       if (Math.abs(r.rot) > 0.5) continue;              // only straight lines, which is nearly all of them
@@ -509,7 +506,7 @@ async function burnedDoc() {
         const x0 = KamPdfText.uAt(r, s), x1 = KamPdfText.uAt(r, e);
         if (x1 - x0 < 0.2) continue;
         if (!clear(x0, x1, r.y, r.y + r.h)) continue;   // this word was redacted: leave it out
-        const word = sanitizeForFont(m[0], font);
+        const { font, text: word } = await fontFor({ font: 'Helvetica', bold: false }, m[0]);
         if (!word.trim()) continue;
         let size = Math.max(1, r.size);
         try { const nat = font.widthOfTextAtSize(word, size); if (nat > x1 - x0 && nat > 0) size *= (x1 - x0) / nat; } catch (err) { }
@@ -557,9 +554,9 @@ async function burnedDoc() {
         const c = toU(a.x + (a.w / 2) * cos - (a.h / 2) * sin, a.y + (a.w / 2) * sin + (a.h / 2) * cos);
         page.drawEllipse({ x: c.x, y: c.y, xScale: a.w / 2, yScale: a.h / 2, rotate, color: a.fill ? hexToRgb(a.fill) : undefined, borderColor: a.stroke ? hexToRgb(a.stroke) : undefined, borderWidth: a.stroke ? a.width : 0, opacity: op, borderOpacity: op });
       } else if (a.type === 'text') {
-        const font = await getFont(a);
+        const { font, text } = await fontFor(a, (a.lines || [a.text]).join('\n'));
         const base = toU(a.x - a.size * 0.9 * sin, a.y + a.size * 0.9 * cos);
-        page.drawText(sanitizeForFont((a.lines || [a.text]).join('\n'), font), { x: base.x, y: base.y, size: a.size, font, color: hexToRgb(a.color), opacity: op, rotate, lineHeight: a.size * 1.2 });
+        page.drawText(text, { x: base.x, y: base.y, size: a.size, font, color: hexToRgb(a.color), opacity: op, rotate, lineHeight: a.size * 1.2 });
       } else if (a.type === 'image') {
         const img = await getImage(a);
         page.drawImage(img, { x: bl.x, y: bl.y, width: a.w, height: a.h, rotate, opacity: op });
@@ -567,7 +564,8 @@ async function burnedDoc() {
     }
   }
 
-  if (!redacted.length) return doc;
+  const sayLost = () => { if (lost.size) toast(`${[...lost].join(' ')} could not be saved: none of the fonts in KAM PDFs has ${lost.size === 1 ? 'it' : 'them'}. The rest of your text is saved.`, 7000); };
+  if (!redacted.length) { sayLost(); return doc; }
 
   /* Redacted pages are rebuilt from a picture of themselves, so the words behind the black
      boxes are not in the file at all. Then everything is copied into a fresh document: only
@@ -590,6 +588,7 @@ async function burnedDoc() {
     if (k) clean.setKeywords(k.split(/,\s*/).filter(Boolean));
   } catch (e) { }
   clean.setProducer('KAM PDFs'); clean.setModificationDate(new Date());
+  sayLost();
   return clean;
 }
 async function exportBytes() {

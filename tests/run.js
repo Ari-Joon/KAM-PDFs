@@ -1023,6 +1023,50 @@ test('every bundled font draws every letter once it is cut down and saved into a
   eq(checked, 20, 'all twenty bundled fonts were checked');
 });
 
+test('your own text keeps every letter when saved: Polish, Greek, Russian, symbols', async b => {
+  await b.reload();
+  await b.evaluate(makeDoc(`doc.addPage([520, 300]);`));
+  await b.waitFor(settled);
+  await b.evaluate(`(async () => { const L = curAnnots();
+    const T = (x, y, t, e) => { const a = Object.assign({ id: uid(), type: 'text', x, y, w: 0, h: 0, rot: 0, text: t, size: 16, font: 'Helvetica', bold: false, color: '#111111', opacity: 1 }, e); measureText(a); L.push(a); };
+    T(30, 20, 'Plain letters in Helvetica');
+    T(30, 60, 'Zażółć gęślą jaźń → €5');
+    T(30, 100, 'Ωμέγα και Привет мир', { font: 'TimesRoman' });
+    T(30, 140, 'Carlito looks like Calibri', { font: 'Carlito' });
+    T(30, 180, 'Caladea bold, like Cambria', { font: 'Caladea', bold: true });
+    T(30, 220, 'Tick ✓ and 漢字');
+    await KamFonts.face('Carlito-Regular'); await KamFonts.face('Caladea-Bold');
+    for (const a of L) measureText(a);
+    drawOverlay(); return L.length; })()`);
+  const saved = await b.evaluate(exportBase64);
+  const text = (await b.evaluate(textOf(saved)))[0].replace(/\s+/g, ' ');
+  for (const want of ['Plain letters in Helvetica', 'Zażółć gęślą jaźń → €5', 'Ωμέγα και Привет мир', 'Carlito looks like Calibri', 'Caladea bold, like Cambria', 'Tick and'])
+    ok(text.includes(want), `"${want}" did not survive saving: ${text}`);
+  ok(!text.includes('?'), 'a letter was replaced by a question mark');
+  ok(/✓/.test(await b.evaluate(`document.getElementById('toast').textContent`)), 'saving should say which characters it could not keep');
+  // the standard font where it can write everything (nothing added to the file), the matching
+  // bundled font where it cannot
+  const fonts = await b.evaluate(fontsOfSaved(saved));
+  for (const f of ['Helvetica', 'LiberationSans', 'LiberationSerif', 'Carlito', 'Caladea-Bold'])
+    ok(fonts.some(x => x === f || x.startsWith(f)), `${f} should be in the saved file: ${fonts}`);
+  // Carlito and Caladea are drawn on screen from the very files that are saved
+  const scr = await b.evaluate(`(async () => {
+    const s = atob(${JSON.stringify(saved)}); const u = new Uint8Array(s.length);
+    for (let i = 0; i < s.length; i++) u[i] = s.charCodeAt(i);
+    const saved = await (await pdfjsLib.getDocument({ data: u }).promise).getPage(1), orig = await state.pdfjs.getPage(1);
+    const draw = async (p, marks) => { const vp = p.getViewport({ scale: 2 }); const c = document.createElement('canvas'); c.width = vp.width; c.height = vp.height;
+      const g = c.getContext('2d'); g.fillStyle = '#fff'; g.fillRect(0, 0, c.width, c.height); await p.render({ canvasContext: g, viewport: vp }).promise;
+      if (marks) drawAnnots(g, state.pageIds[0], 2, null, { spell: false, marks: false });
+      return g.getImageData(0, 270, c.width, 150).data; };            // the Carlito and Caladea lines
+    const A = await draw(orig, true), B = await draw(saved, false);
+    let bad = 0; for (let i = 0; i < A.length; i += 4) if (Math.abs(A[i] - B[i]) + Math.abs(A[i + 1] - B[i + 1]) + Math.abs(A[i + 2] - B[i + 2]) > 90) bad++;
+    return { bad, total: A.length / 4 };
+  })()`);
+  ok(scr.bad / scr.total < 0.002, `Carlito and Caladea look different on screen and in the file: ${scr.bad} pixels`);
+  const fium = pdfiumText(Buffer.from(saved, 'base64'));
+  if (fium !== null) ok(fium.includes('Zażółć gęślą jaźń → €5') && fium.includes('Привет мир'), `PDFium reads the letters wrong: ${fium}`);
+});
+
 test('text edits can be hidden, retyped, taken back, and survive the window closing', async b => {
   await b.reload();
   await b.evaluate(makeDoc(`doc.addPage([420, 300]).drawText('Account holder: Jane Smith', { x: 30, y: 250, size: 14, font: f });`));

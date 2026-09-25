@@ -176,7 +176,7 @@ body.no-doc #pages{display:none}
 /* the hidden box that takes the typing when a line of the PDF's own text is edited (textedit.js);
    what you see is drawn on the page itself, in the document's font */
 #phraseInput{position:absolute;z-index:3;opacity:0;pointer-events:none;resize:none;overflow:hidden;border:0;padding:0;margin:0;width:40px;min-height:6px;background:transparent;color:transparent;caret-color:transparent;white-space:pre;line-height:1;transform-origin:0 0}
-#textEditor{position:absolute;z-index:3;display:none;background:rgba(255,255,255,.85);border:1px dashed var(--accent);padding:0;margin:0;resize:none;overflow:hidden;color:#000;outline:none;line-height:1.2;min-width:30px;white-space:pre;overflow-wrap:break-word;word-break:break-word;border-radius:0;transform-origin:0 0;caret-color:#1d4ed8;box-shadow:0 0 0 1px rgba(255,255,255,.9),0 0 0 2px rgba(245,180,0,.6)}
+#textEditor{position:absolute;z-index:3;display:none;font-kerning:none;background:rgba(255,255,255,.85);border:1px dashed var(--accent);padding:0;margin:0;resize:none;overflow:hidden;color:#000;outline:none;line-height:1.2;min-width:30px;white-space:pre;overflow-wrap:break-word;word-break:break-word;border-radius:0;transform-origin:0 0;caret-color:#1d4ed8;box-shadow:0 0 0 1px rgba(255,255,255,.9),0 0 0 2px rgba(245,180,0,.6)}
 #pager{container-type:inline-size;display:grid;grid-template-columns:minmax(0,1fr) auto minmax(max-content,1fr);align-items:center;gap:12px;padding:5px 10px;background:var(--panel);border-top:1px solid var(--border);flex:none;order:5}
 #pager input{width:54px;text-align:center}
 #pageTotal{color:var(--muted)}
@@ -496,7 +496,7 @@ details.tip>div{padding:0 2px 11px;line-height:1.55}
         <label data-p="fill">Fill <input type="checkbox" id="pFillOn"> <input type="color" id="pFill" value="#ffff00"></label>
         <label data-p="width">Width <input type="number" id="pWidth" min="0.5" max="50" step="0.5" value="2"></label>
         <label data-p="size">Size <input type="number" id="pSize" min="4" max="200" step="1" value="16"></label>
-        <label data-p="font">Font <select id="pFont"><option value="Helvetica">Helvetica</option><option value="TimesRoman">Times</option><option value="Courier">Courier</option></select></label>
+        <label data-p="font">Font <select id="pFont"><option value="Helvetica">Helvetica</option><option value="TimesRoman">Times</option><option value="Courier">Courier</option><option value="Carlito">Carlito (like Calibri)</option><option value="Caladea">Caladea (like Cambria)</option></select></label>
         <label data-p="bold"><input type="checkbox" id="pBold"> Bold</label>
         <label data-p="opacity">Opacity <input type="range" id="pOpacity" min="0.05" max="1" step="0.05" value="1"></label>
         <button id="btnDelAnnot" style="display:none" title="Delete selected (Del)"><svg class="ic" aria-hidden="true"><use href="#i-trash"/></svg> Delete</button>

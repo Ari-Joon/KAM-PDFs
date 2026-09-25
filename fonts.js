@@ -140,5 +140,50 @@ const KamFonts = (() => {
     catch (e) { return null; }
   }
 
-  return { ready, isReady, bundled, bundledNow: k => bundledNow.get(k) || null, describe, fallbackKey, lastResortKey, forPdf, pathOf, glyphFor };
+  /* ---------- the fonts you can choose for your own text ----------
+     Helvetica, Times and Courier are the PDF standard fonts: saved as they are when they can
+     write every letter, and otherwise as Liberation Sans, Serif or Mono, which have the same
+     measurements and far more letters. Carlito and Caladea stand in for Calibri and Cambria.
+     On screen the chosen font is drawn from the same file that is saved. */
+  const CHOICES = { Helvetica: 'LiberationSans', TimesRoman: 'LiberationSerif', Courier: 'LiberationMono', Carlito: 'Carlito', Caladea: 'Caladea' };
+  const keyFor = (font, bold, italic) => `${CHOICES[font] || 'LiberationSans'}-${styleKey(bold, italic)}`;
+  const faces = new Map(), facesLoaded = new Set();
+  // A CSS family for one of the bundled fonts, loaded as a web font from its own bytes.
+  function face(key) {
+    let p = faces.get(key);
+    if (!p) {
+      p = bundled(key).then(async b => {
+        const [fam, style] = key.split('-');
+        const f = new FontFace('KAM ' + fam, b.bytes, { weight: /Bold/.test(style) ? '700' : '400', style: /Italic/.test(style) ? 'italic' : 'normal' });
+        await f.load(); document.fonts.add(f);
+        facesLoaded.add(key);
+        return 'KAM ' + fam;
+      });
+      p.catch(() => faces.delete(key));
+      faces.set(key, p);
+    }
+    return p;
+  }
+  const faceReady = key => facesLoaded.has(key);
+  // Which characters of a text a font cannot write.
+  function missingFrom(fk, text) {
+    const out = new Set();
+    for (const ch of text) { if (/\s/.test(ch)) continue; if (!glyphFor(fk, ch.codePointAt(0))) out.add(ch); }
+    return [...out];
+  }
+  // What the standard fonts can write: Latin-1 and the handful of Windows extras.
+  const WIN_ANSI_EXTRA = '\u20AC\u201A\u0192\u201E\u2026\u2020\u2021\u02C6\u2030\u0160\u2039\u0152\u017D\u2018\u2019\u201C\u201D\u2022\u2013\u2014\u02DC\u2122\u0161\u203A\u0153\u017E\u0178';
+  const winAnsi = ch => { const c = ch.codePointAt(0); return (c >= 0x20 && c <= 0x7e) || (c >= 0xa0 && c <= 0xff) || WIN_ANSI_EXTRA.includes(ch); };
+  // The characters of your own text that cannot be saved in the font you chose: not a standard
+  // font letter, and not in the bundled font that stands in for it either.
+  async function unsaveable(font, bold, text) {
+    const std = font === 'Helvetica' || font === 'TimesRoman' || font === 'Courier';
+    const need = [...new Set(text)].filter(ch => !/\s/.test(ch) && !(std && winAnsi(ch)));
+    if (!need.length) return [];
+    const b = await bundled(keyFor(font, bold));
+    return missingFrom(b.fk, need.join(''));
+  }
+
+  return { ready, isReady, bundled, bundledNow: k => bundledNow.get(k) || null, describe, fallbackKey, lastResortKey, forPdf, pathOf, glyphFor,
+           keyFor, face, faceReady, missingFrom, unsaveable, CHOICES };
 })();

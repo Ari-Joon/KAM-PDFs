@@ -15,8 +15,26 @@ const imgCache = new Map();
 
 function curPageId() { return state.pageIds[state.cur]; }
 function curAnnots() { const id = curPageId(); if (!state.annots[id]) state.annots[id] = []; return state.annots[id]; }
-function fontFamily(f) { return f === 'TimesRoman' ? '"Times New Roman",Times,serif' : f === 'Courier' ? '"Courier New",Courier,monospace' : 'Helvetica,Arial,sans-serif'; }
-function fontCss(a, s) { return `${a.bold ? 'bold ' : ''}${a.size * s}px ${fontFamily(a.font)}`; }
+// The fonts you can choose for your own text. Carlito and Caladea (the Calibri and Cambria
+// look-alikes) are drawn from the same files that are saved into the PDF (fonts.js), and until
+// those have loaded, from Calibri or Cambria if the computer has them.
+function fontFamily(f) {
+  return f === 'TimesRoman' ? '"Times New Roman",Times,serif' : f === 'Courier' ? '"Courier New",Courier,monospace'
+    : f === 'Carlito' ? '"KAM Carlito",Carlito,Calibri,sans-serif' : f === 'Caladea' ? '"KAM Caladea",Caladea,Cambria,serif'
+    : 'Helvetica,Arial,sans-serif';
+}
+function fontCss(a, s) { needFace(a); return `${a.bold ? 'bold ' : ''}${a.size * s}px ${fontFamily(a.font)}`; }
+// Load the bundled font a text box asks for; once it is here, measure and draw again with it.
+function needFace(a) {
+  if ((a.font !== 'Carlito' && a.font !== 'Caladea') || typeof KamFonts === 'undefined') return;
+  const key = KamFonts.keyFor(a.font, a.bold);
+  if (KamFonts.faceReady(key)) return;
+  KamFonts.face(key).then(() => {
+    for (const id in state.annots) for (const t of state.annots[id]) if (t.type === 'text' && t.font === a.font) measureText(t);
+    drawOverlay(); if (typeof positionTextEditor === 'function') positionTextEditor();
+  }).catch(() => { });
+}
+measureCtx.fontKerning = 'none';            // a PDF places letters by their widths alone, so the screen does too
 // Break text into lines. With a fixed box width (a.boxW) words wrap automatically.
 function wrapLines(a) {
   measureCtx.font = fontCss(a, 1);
@@ -114,7 +132,7 @@ function drawAnnot(ctx, a, s, spell, marks) {
     ctx.translate(a.x * s, a.y * s); ctx.rotate(a.rot * Math.PI / 180);
     const w = a.w * s, h = a.h * s;
     if (a.type === 'text') {
-      ctx.fillStyle = a.color; ctx.font = fontCss(a, s); ctx.textBaseline = 'alphabetic';
+      ctx.fillStyle = a.color; ctx.font = fontCss(a, s); ctx.textBaseline = 'alphabetic'; ctx.fontKerning = 'none';
       const lh = a.size * 1.2 * s;
       (a.lines || a.text.split('\n')).forEach((line, i) => ctx.fillText(line, 0, i * lh + a.size * 0.9 * s));
       if (spell) drawSpellMarks(ctx, a, s);
@@ -483,8 +501,16 @@ function commitTextEdit() {
   a.text = ed.value; ed.style.display = 'none';
   const list = curAnnots();
   if (!a.text.trim()) { const i = list.indexOf(a); if (i >= 0) list.splice(i, 1); }
-  else measureText(a);
+  else { measureText(a); warnUnsaveable(a); }
   drawOverlay(); refreshThumb(state.cur); updateProps();
+}
+// Say straight away if some of what was typed cannot be saved in this font, not only when the
+// file is saved: the screen can borrow any font the computer has, the saved file cannot.
+function warnUnsaveable(a) {
+  if (typeof KamFonts === 'undefined' || !/[^ -~\s]/.test(a.text)) return;
+  KamFonts.unsaveable(a.font, a.bold, a.text).then(lost => {
+    if (lost.length) toast(`${lost.join(' ')} cannot be saved in this font, so ${lost.length === 1 ? 'it' : 'they'} will be left out of the saved file.`, 6000);
+  }).catch(() => { });
 }
 
 /* ---------- images & signature ---------- */
