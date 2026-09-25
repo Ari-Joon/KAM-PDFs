@@ -99,6 +99,7 @@ const KamDraft = (() => {
         if (state.ocr) state.ocr[id] = (draft.ocr && draft.ocr[i]) || [];
       });
       state.nextId = Math.max(state.nextId, maxId + 1);
+      markChanged();                  // a restored session has changes the file on disk does not
       state.cur = Math.min(draft.cur || 0, state.pageIds.length - 1);
       await goTo(state.cur);
       renderThumbs();
@@ -116,7 +117,7 @@ const KamDraft = (() => {
     btns.forEach(b => {
       b.hidden = false;
       b.textContent = b.id === 'btnRestoreEmpty' ? `Restore "${draft.fileName}"` : 'Restore last session';
-      b.onclick = () => { if (state.doc && !confirm('Replace what is open with your last session?')) return; restore(draft); };
+      b.onclick = async () => { if (await keepOrDiscard('restore your last session')) restore(draft); };
     });
   }
 

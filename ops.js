@@ -7,7 +7,7 @@ async function structOp(fn, { clearThumbs = false } = {}) {
   pushStructUndo();
   busy(true);
   try { await fn(); if (clearThumbs) state.thumbCache.clear(); await rebuild(); }
-  catch (e) { console.error(e); state.undo.pop(); toast('Operation failed: ' + e.message, 5000); }
+  catch (e) { console.error(e); dropLastUndo(); toast('Operation failed: ' + e.message, 5000); }
   busy(false);
 }
 
@@ -84,15 +84,75 @@ $$('.side-actions button').forEach(b => b.onclick = () => {
 });
 
 /* ---------- merge & images ---------- */
+/* Copying pages brings their fill-in boxes along, but not the form's list of fields, so the
+   boxes arrived as orphans: the Form tab could not see them, and flattening could not reach
+   them, which left them painted on top of anything drawn over them in the saved file. Put
+   each copied field into this document's form, renamed if the name is already taken. */
+function adoptFormFields(src, pages) {
+  const L = PDFLib, ctx = state.doc.context, N = n => L.PDFName.of(n);
+  const tops = new Set();
+  for (const p of pages) {
+    const annots = p.node.Annots(); if (!annots) continue;
+    for (let i = 0; i < annots.size(); i++) {
+      const ref = annots.get(i), w = ctx.lookup(ref);
+      if (!(w instanceof L.PDFDict) || w.get(N('Subtype')) !== N('Widget')) continue;
+      let fieldRef = ref, field = w;
+      for (let guard = 0; guard < 64; guard++) {
+        const pr = field.get(N('Parent')); if (!(pr instanceof L.PDFRef)) break;
+        const parent = ctx.lookup(pr); if (!(parent instanceof L.PDFDict)) break;
+        fieldRef = pr; field = parent;
+      }
+      if (fieldRef instanceof L.PDFRef && field.get(N('T'))) tops.add(fieldRef);
+    }
+  }
+  if (!tops.size) return 0;
+  const form = state.doc.getForm(), acro = form.acroForm;
+  const taken = new Set(form.getFields().map(f => f.getName().split('.')[0]));
+  for (const ref of tops) {
+    const f = ctx.lookup(ref), t = f.lookup(N('T'));
+    let name = t && t.decodeText ? t.decodeText() : '';
+    if (taken.has(name)) {
+      let k = 2; while (taken.has(`${name}_${k}`)) k++;
+      name = `${name}_${k}`; f.set(N('T'), L.PDFHexString.fromText(name));
+    }
+    taken.add(name);
+    acro.addField(ref);
+  }
+  // the defaults the fields' own appearances were written against: fonts, and the default look
+  try {
+    const srcAcro = src.catalog.getAcroForm();
+    if (srcAcro) {
+      const copier = L.PDFObjectCopier.for(src.context, ctx);
+      const sd = srcAcro.dict;
+      if (!acro.dict.get(N('DA')) && sd.get(N('DA'))) acro.dict.set(N('DA'), copier.copy(sd.lookup(N('DA'))));
+      const sDR = sd.lookup(N('DR'));
+      if (sDR instanceof L.PDFDict) {
+        let dDR = acro.dict.lookup(N('DR'));
+        if (!(dDR instanceof L.PDFDict)) { dDR = ctx.obj({}); acro.dict.set(N('DR'), dDR); }
+        const sFonts = sDR.lookup(N('Font'));
+        if (sFonts instanceof L.PDFDict) {
+          let dFonts = dDR.lookup(N('Font'));
+          if (!(dFonts instanceof L.PDFDict)) { dFonts = ctx.obj({}); dDR.set(N('Font'), dFonts); }
+          for (const [k, v] of sFonts.entries()) if (!dFonts.get(k)) dFonts.set(k, copier.copy(v));
+        }
+      }
+      if (sd.get(N('NeedAppearances'))) acro.dict.set(N('NeedAppearances'), sd.get(N('NeedAppearances')));
+    }
+  } catch (e) { console.warn('form defaults not copied', e); }
+  return tops.size;
+}
 async function mergeFiles(files) {
+  let adopted = 0;
   await structOp(async () => {
     for (const f of files) {
       const src = await PDFDocument.load(await readFile(f), { ignoreEncryption: true });
       if (src.isEncrypted) { toast(`${f.name} is password-protected and was skipped`, 5000); continue; }
       const pages = await state.doc.copyPages(src, src.getPageIndices());
       for (const p of pages) { state.doc.addPage(p); state.pageIds.push(uid()); }
+      try { adopted += adoptFormFields(src, pages); } catch (e) { console.warn('could not adopt form fields', e); }
     }
   });
+  if (adopted) { loadFormFields(); toast(`Added ${adopted} fill-in field${adopted === 1 ? '' : 's'} from the new pages. They are in the Form tab.`, 5000); }
 }
 $('#btnMerge').onclick = () => { if (!state.doc) return toast('Open a PDF first, then merge others into it'); $('#mergeInput').click(); };
 $('#mergeInput').addEventListener('change', async e => { const fs = [...e.target.files]; e.target.value = ''; if (fs.length) await mergeFiles(fs); });
@@ -321,6 +381,35 @@ async function annotsCoverAFormField() {
   return false;
 }
 
+/* A fill-in box that belongs to no field in the form: viewers still paint it on top of the
+   page, but flattening the form never reaches it. Paint its current look into the page and
+   remove the box, the same way flattening treats real fields. */
+function flattenLeftoverWidgets(doc) {
+  const L = PDFLib, ctx = doc.context, N = n => L.PDFName.of(n);
+  let n = 0;
+  for (const page of doc.getPages()) {
+    const annots = page.node.Annots(); if (!annots) continue;
+    for (let i = annots.size() - 1; i >= 0; i--) {
+      const w = ctx.lookup(annots.get(i));
+      if (!(w instanceof L.PDFDict) || w.get(N('Subtype')) !== N('Widget')) continue;
+      const flags = w.lookup(N('F')), hidden = flags instanceof L.PDFNumber && (flags.asNumber() & 2);
+      const ap = w.lookup(N('AP')); let look = ap instanceof L.PDFDict ? ap.get(N('N')) : null;
+      const lookObj = look && ctx.lookup(look);
+      if (lookObj instanceof L.PDFDict && !(lookObj instanceof L.PDFStream)) {        // on/off states
+        const as = w.get(N('AS')); look = as ? lookObj.get(as) : null;
+      }
+      const rect = w.lookup(N('Rect'));
+      if (look instanceof L.PDFStream) look = ctx.register(look);          // written inline, not by reference
+      if (!hidden && look instanceof L.PDFRef && rect instanceof L.PDFArray) {
+        const r = rect.asRectangle(), key = page.node.newXObject('FlatWidget', look);
+        page.pushOperators(L.pushGraphicsState(), L.translate(r.x, r.y), L.drawObject(key), L.popGraphicsState());
+      }
+      annots.remove(i); n++;
+    }
+  }
+  return n;
+}
+
 /* Render a whole page, with everything we have added, to a bitmap. Used for redaction:
    the page is rebuilt from this image, so the words underneath are gone from the file
    rather than merely hidden. */
@@ -352,14 +441,18 @@ async function burnedDoc() {
   const fieldCount = (() => { try { return doc.getForm().getFields().length; } catch (e) { return 0; } })();
   // Must happen before anything of ours is drawn, so our marks end up on top.
   if ($('#flattenForm').checked || (fieldCount && redacted.length) || await annotsCoverAFormField()) {
+    let flat = 0;
     try {
       const form = doc.getForm();
       if (form.getFields().length) {
         try { form.updateFieldAppearances(); } catch (e) { }
+        flat = form.getFields().length;
         form.flatten();
-        if (!$('#flattenForm').checked) toast('Form fields were merged into the page so your marks stay on top.', 5000);
       }
     } catch (e) { console.warn('flatten failed', e); }
+    // and any box that belongs to no field at all, which flattening the form cannot see
+    try { flat += flattenLeftoverWidgets(doc); } catch (e) { console.warn('leftover widgets not flattened', e); }
+    if (flat && !$('#flattenForm').checked) toast('Form fields were merged into the page so your marks stay on top.', 5000);
   }
   const fonts = {}, imgs = {};
   const fontNames = { Helvetica: ['Helvetica', 'HelveticaBold'], TimesRoman: ['TimesRoman', 'TimesRomanBold'], Courier: ['Courier', 'CourierBold'] };
@@ -424,12 +517,21 @@ async function burnedDoc() {
     for (const a of list) {
       const op = a.opacity == null ? 1 : a.opacity;
       if (a.pts) {
-        const color = hexToRgb(a.color);
-        const segs = [];
-        for (let k = 0; k < a.pts.length - 1; k++) segs.push([a.pts[k], a.pts[k + 1]]);
-        if (a.pts.length === 1) segs.push([a.pts[0], [a.pts[0][0] + 0.1, a.pts[0][1]]]);
-        if (a.type === 'arrow') { const tip = a.pts[a.pts.length - 1]; for (const h of arrowHead(a)) segs.push([tip, h]); }
-        for (const [p, q] of segs) page.drawLine({ start: toU(p[0], p[1]), end: toU(q[0], q[1]), thickness: a.width, color, opacity: op, lineCap: LineCapStyle.Round });
+        /* One path, stroked once, exactly as the screen draws it. Drawing it as hundreds of
+           separate little lines made every joint a double coat of paint, so a half-transparent
+           pen came out of the saved file nearly solid. */
+        const L = PDFLib, P = a.pts.length === 1 ? [a.pts[0], [a.pts[0][0] + 0.1, a.pts[0][1]]] : a.pts;
+        const ops = [L.pushGraphicsState()];
+        if (op < 1) ops.push(L.setGraphicsState(page.node.newExtGState('GS', doc.context.obj({ Type: 'ExtGState', CA: op, ca: op }))));
+        ops.push(L.setStrokingColor(hexToRgb(a.color)), L.setLineWidth(a.width),
+                 L.setLineCap(L.LineCapStyle.Round), L.setLineJoin(L.LineJoinStyle.Round));
+        P.forEach((p, k) => { const u = toU(p[0], p[1]); ops.push(k ? L.lineTo(u.x, u.y) : L.moveTo(u.x, u.y)); });
+        if (a.type === 'arrow') {
+          const t = a.pts[a.pts.length - 1], tip = toU(t[0], t[1]);
+          for (const h of arrowHead(a)) { const e = toU(h[0], h[1]); ops.push(L.moveTo(tip.x, tip.y), L.lineTo(e.x, e.y)); }
+        }
+        ops.push(L.stroke(), L.popGraphicsState());
+        page.pushOperators(...ops);
         continue;
       }
       const th = a.rot * Math.PI / 180, sin = Math.sin(th), cos = Math.cos(th);
@@ -503,10 +605,10 @@ async function savePdf(saveAs) {
     if (handle) {
       const w = await handle.createWritable();
       await w.write(bytes); await w.close();
-      saveTarget = handle; state.dirty = false;
+      saveTarget = handle; state.savedRev = state.rev; state.dirty = false;
       toast('Saved ' + handle.name);
     } else {
-      downloadBytes(bytes, outName()); state.dirty = false;
+      downloadBytes(bytes, outName()); state.savedRev = state.rev; state.dirty = false;
       toast('Saved ' + outName());
     }
   } catch (e) { console.error(e); toast('Save failed: ' + e.message, 6000); }

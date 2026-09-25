@@ -233,7 +233,7 @@ version.json            the version this site is serving, which is how installed
 tests/run.js            the test suite: node tests/run.js
 spell.js                dictionary loading, checking and suggestions
 spell-ui.js             underlines and the spelling review dialog
-dict/en.txt             bundled English word list (loaded on first use)
+dict/en.js              bundled English word list (loaded on first use)
 scan.html               phone scanner page
 scan-core.js            edge detection, perspective correction, clean-up
 scan-ui.js              corner editor widget (phone and desktop)

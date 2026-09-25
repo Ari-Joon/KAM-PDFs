@@ -1245,6 +1245,192 @@ test('a first tip appears once, and then stays gone', async b => {
   eq(await b.evaluate(`document.getElementById('coach').hidden`), true, 'and it does not come back');
 });
 
+/* ---------- 2.0: work is never thrown away, and nothing in a PDF can run ---------- */
+// Hand the page a file the way the file picker does, without the picker.
+const pickFile = (inputId, bytesExpr, name) => `(async () => {
+  const bytes = await (${bytesExpr});
+  const dt = new DataTransfer(); dt.items.add(new File([bytes], ${JSON.stringify(name)}, { type: 'application/pdf' }));
+  const input = document.getElementById('${inputId}'); input.files = dt.files;
+  input.dispatchEvent(new Event('change', { bubbles: true }));
+  return 1; })()`;
+const pdfBytes = label => `(async () => { const { PDFDocument, StandardFonts } = PDFLib; const d = await PDFDocument.create();
+  const f = await d.embedFont(StandardFonts.Helvetica); d.addPage([420, 300]).drawText(${JSON.stringify(label)}, { x: 30, y: 250, size: 18, font: f }); return d.save(); })()`;
+const dialogTitle = `(() => { const m = document.getElementById('modal'); return m.classList.contains('show') ? document.querySelector('#modalBox h3').textContent : null; })()`;
+const clickChoice = label => `(() => { const b = [...document.querySelectorAll('#modalBox button')].find(b => b.textContent === ${JSON.stringify(label)}); if (!b) throw new Error('no button ' + ${JSON.stringify(label)}); b.click(); return 1; })()`;
+const makeDirty = `(() => { pushAnnotUndo(curPageId());
+  const a = { id: uid(), type: 'text', x: 40, y: 120, w: 0, h: 0, rot: 0, text: 'AN HOUR OF WORK', size: 14, font: 'Helvetica', bold: false, color: '#e11d48', opacity: 1 };
+  measureText(a); curAnnots().push(a); drawOverlay(); return 1; })()`;
+// saving without a file picker or a real download, so the tests stay on this machine
+const stubSaving = `(() => { window.showSaveFilePicker = undefined; window.__downloads = []; window.downloadBytes = (b, n) => { window.__downloads.push(n); }; return 1; })()`;
+
+test('opening another file asks before throwing work away', async b => {
+  await b.reload();
+  await b.evaluate(stubSaving);
+  await b.evaluate(makeDoc(`doc.addPage([420, 300]);`));
+  await b.waitFor(settled);
+  await b.evaluate(makeDirty);
+  eq(await b.evaluate(`state.dirty`), true, 'the document has unsaved work');
+
+  await b.evaluate(pickFile('fileInput', pdfBytes('Document B'), 'B.pdf'));
+  await b.waitFor(`${dialogTitle} !== null`, 5000);
+  ok(/Save changes/.test(await b.evaluate(dialogTitle)), 'it asks about the unsaved changes first');
+  await b.evaluate(clickChoice('Cancel'));
+  await b.waitFor(`${dialogTitle} === null`, 3000);
+  eq(await b.evaluate(`[state.fileName, curAnnots().some(a => a.text === 'AN HOUR OF WORK'), state.dirty]`), ['test.pdf', true, true],
+    'Cancel keeps the document and the work in it');
+
+  await b.evaluate(pickFile('fileInput', pdfBytes('Document B'), 'B.pdf'));
+  await b.waitFor(`${dialogTitle} !== null`, 5000);
+  await b.evaluate(clickChoice("Don't save"));
+  await b.waitFor(`state.fileName === 'B.pdf' && !state.renderTask && !document.getElementById('busy').classList.contains('show')`, 8000);
+  eq(await b.evaluate(`[state.dirty, document.title.startsWith('•')]`), [false, false], 'the new file opens clean, with no unsaved mark');
+
+  await b.evaluate(makeDirty);
+  await b.evaluate(pickFile('fileInput', pdfBytes('Document C'), 'C.pdf'));
+  await b.waitFor(`${dialogTitle} !== null`, 5000);
+  await b.evaluate(clickChoice('Save'));
+  try { await b.waitFor(`state.fileName === 'C.pdf' && !state.renderTask`, 8000); }
+  catch (e) {
+    throw new Failed('did not open C after saving: ' + JSON.stringify(await b.evaluate(`({ file: state.fileName, dirty: state.dirty, dl: window.__downloads,
+      dialog: ${dialogTitle}, toast: document.getElementById('toast').textContent, busy: document.getElementById('busy').className })`)) + ' errors: ' + b.errors.join(' | '));
+  }
+  eq(await b.evaluate(`window.__downloads`), ['B-edited.pdf'], 'Save wrote the work out before the next file opened');
+});
+
+test('dropping a PDF on an open document never discards work by accident', async b => {
+  await b.reload();
+  await b.evaluate(stubSaving);
+  await b.evaluate(makeDoc(`doc.addPage([420, 300]);`));
+  await b.waitFor(settled);
+  await b.evaluate(makeDirty);
+  const drop = `(async () => { const f = new File([await ${pdfBytes('Dropped')}], 'dropped.pdf', { type: 'application/pdf' });
+    window.__drop = handleDroppedFiles([f]); return 1; })()`;
+
+  await b.evaluate(drop);
+  await b.waitFor(`${dialogTitle} !== null`, 5000);
+  ok(/Add “dropped.pdf”/.test(await b.evaluate(dialogTitle)), 'it asks what to do with the dropped file');
+  await b.evaluate(clickChoice('Cancel'));
+  await b.evaluate(`window.__drop`);
+  eq(await b.evaluate(`[state.fileName, state.pageIds.length, state.dirty]`), ['test.pdf', 1, true], 'Cancel changes nothing at all');
+
+  await b.evaluate(drop);
+  await b.waitFor(`${dialogTitle} !== null`, 5000);
+  await b.evaluate(clickChoice('Open instead'));
+  await b.waitFor(`${dialogTitle} !== null && /Save changes/.test(${dialogTitle})`, 5000);
+  await b.evaluate(clickChoice('Cancel'));
+  await b.evaluate(`window.__drop`);
+  eq(await b.evaluate(`state.fileName`), 'test.pdf', 'opening instead still asks about unsaved work, and Cancel keeps it');
+
+  await b.evaluate(drop);
+  await b.waitFor(`${dialogTitle} !== null`, 5000);
+  await b.evaluate(clickChoice('Add pages'));
+  await b.evaluate(`window.__drop`);
+  await b.waitFor(`state.pageIds.length === 2 && !state.renderTask`, 8000);
+  eq(await b.evaluate(`curAnnots().some(a => a.text === 'AN HOUR OF WORK') || state.annots[state.pageIds[0]].some(a => a.text === 'AN HOUR OF WORK')`), true, 'Add pages keeps the work');
+});
+
+test('text inside a PDF can never run as code in the app', async b => {
+  await b.reload();
+  await b.evaluate(makeDoc(`doc.addPage([595, 842]).drawText('<img src=x onerror=__p=1>', { x: 50, y: 700, size: 18, font: f });`));
+  await b.waitFor(settled);
+  await b.evaluate(`window.__p = 0; KamPdfText.index(0)`);
+  // the ordinary way to remove a line: click it, press Delete, then look at the Layers tab
+  await b.evaluate(`(() => { const r = KamPdfText.runsOf(0).find(r => r.text.includes('onerror'));
+    pdfTextSelect(r.x + 5, r.y + r.h / 2); pdfTextDeleteSelected();
+    document.querySelector('.tabs button[data-tab="layers"]').click(); return 1; })()`);
+  await sleep(600);
+  eq(await b.evaluate(`window.__p`), 0, 'the text did not run');
+  ok((await b.evaluate(`document.querySelector('#layerList .layer-name').textContent`)).includes('<img src=x onerror=__p=1>'),
+    'it is shown as the plain text it is');
+  // and a second lock behind the first: the page refuses inline script outright
+  ok(/script-src 'self'/.test(await b.evaluate(`document.querySelector('meta[http-equiv="Content-Security-Policy"]').content`)), 'a content security policy is in place');
+  eq(await b.evaluate(`new Promise(r => { window.__q = 0; document.body.insertAdjacentHTML('beforeend', '<img src="nothing-here.png" onerror="window.__q=1">'); setTimeout(() => r(window.__q), 500); })`),
+    0, 'an injected inline handler is refused');
+  b.errors.length = 0;
+});
+
+test('a half-transparent pen saves exactly as it looks', async b => {
+  await b.reload();
+  await b.evaluate(makeDoc(`doc.addPage([595, 842]);`));
+  await b.waitFor(settled);
+  await b.evaluate(`(() => { const pts = []; for (let i = 0; i <= 300; i++) { const t = i / 300; pts.push([60 + t * 470, 200 + 60 * Math.sin(t * Math.PI * 6)]); }
+    curAnnots().push({ id: uid(), type: 'pen', pts, color: '#1d4ed8', width: 14, opacity: 0.5 });
+    curAnnots().push({ id: uid(), type: 'arrow', pts: [[80, 420], [420, 520]], color: '#e11d48', width: 8, opacity: 0.4 }); return 1; })()`);
+  const r = await b.evaluate(exportVsScreen(0, 2));
+  ok(r.differing / r.total < 0.002, `the saved strokes differ from the screen on ${(100 * r.differing / r.total).toFixed(2)}% of the page`);
+});
+
+test('fill-in fields in a combined PDF are adopted, and stay under your marks', async b => {
+  await b.reload();
+  await b.evaluate(makeDoc(`doc.addPage([595, 842]).drawText('Cover page', { x: 50, y: 780, size: 20, font: f });`));
+  await b.waitFor(settled);
+  const r = await b.evaluate(`(async () => {
+    const { PDFDocument, rgb } = PDFLib;
+    const formDoc = await PDFDocument.create(), fp = formDoc.addPage([595, 842]);
+    const tf = formDoc.getForm().createTextField('applicant.name'); tf.setText('OLD ANSWER');
+    tf.addToPage(fp, { x: 60, y: 600, width: 300, height: 40, backgroundColor: rgb(0.8, 0.9, 1) });
+    await mergeFiles([new File([await formDoc.save()], 'form.pdf', { type: 'application/pdf' })]);
+    const fields = state.doc.getForm().getFields().map(f => f.getName());
+    await deletePages([0]);                              // the form page is now the first page
+    curAnnots().push({ id: uid(), type: 'rect', x: 55, y: 842 - 645, w: 310, h: 50, rot: 0, fill: '#ffffff', stroke: null, width: 0, opacity: 1 });
+    const t = { id: uid(), type: 'text', x: 64, y: 842 - 632, w: 0, h: 0, rot: 0, text: 'MY CORRECTION', size: 18, font: 'Helvetica', bold: true, color: '#e11d48', opacity: 1 };
+    measureText(t); curAnnots().push(t);
+    return { fields, formTab: document.querySelectorAll('#formFields [data-name]').length }; })()`);
+  eq(r.fields, ['applicant.name'], 'the combined field joined this document\'s form');
+  ok(r.formTab >= 1, 'and the Form tab can see it');
+  const b64 = await b.evaluate(exportBase64);
+  const look = pdfiumColours(Buffer.from(b64, 'base64'), 0, [62, 842 - 638, 358, 842 - 602]);
+  if (look === null) { console.log('        (PDFium check skipped: pypdfium2 or Pillow not installed)'); return; }
+  ok(look.red > 20, `PDFium shows the correction written over the field (red pixels: ${look.red})`);
+  ok(look.fieldBlue < 20, `and the old field is no longer painted on top of it (field-blue pixels: ${look.fieldBlue})`);
+});
+
+test('undo back to what was saved clears the unsaved mark, and page changes can be redone', async b => {
+  await b.reload();
+  await b.evaluate(stubSaving);
+  await b.evaluate(makeDoc(`doc.addPage([420, 300]); doc.addPage([420, 300]);`));
+  await b.waitFor(settled);
+  await b.evaluate(makeDirty);
+  await b.evaluate(`savePdf(false)`);
+  eq(await b.evaluate(`state.dirty`), false, 'saved');
+  await b.evaluate(`undo()`);
+  eq(await b.evaluate(`state.dirty`), true, 'undoing past the save brings the unsaved mark back');
+  await b.evaluate(`redo()`);
+  eq(await b.evaluate(`state.dirty`), false, 'redoing back to exactly what was saved clears it again');
+
+  const angle = `state.doc.getPage(1).getRotation().angle`;
+  await b.evaluate(`rotatePages([1], 1)`); await b.waitFor(settled);
+  eq(await b.evaluate(angle), 90, 'page turned');
+  await b.evaluate(`undo()`); await b.waitFor(settled);
+  eq(await b.evaluate(angle), 0, 'undo turned it back');
+  await b.evaluate(`redo()`); await b.waitFor(settled);
+  eq(await b.evaluate(angle), 90, 'and redo turned it again');
+  eq(await b.evaluate(`(() => { state.fileName = 'report-edited.pdf'; return outName(); })()`), 'report-edited.pdf', 'saving again does not grow the name');
+});
+
+test('paste uses whatever was copied last, here or anywhere else', async b => {
+  await b.reload();
+  await b.evaluate(makeDoc(`doc.addPage([595, 842]);`));
+  await b.waitFor(settled);
+  // a mark copied earlier in the app
+  await b.evaluate(`(() => { const a = { id: uid(), type: 'rect', x: 40, y: 40, w: 60, h: 40, rot: 0, stroke: '#000000', fill: null, width: 2, opacity: 1 };
+    curAnnots().push(a); state.clipboard = JSON.stringify(a); state.clipboardOnSystem = true; return 1; })()`);
+  const paste = data => `(async () => { const dt = new DataTransfer();
+    ${data}
+    document.activeElement.blur();
+    document.dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true }));
+    await new Promise(r => setTimeout(r, 300)); return curAnnots().map(a => a.type); })()`;
+  // then a picture copied from another program
+  const withImage = await b.evaluate(paste(`const c = document.createElement('canvas'); c.width = 40; c.height = 30; c.getContext('2d').fillRect(0, 0, 40, 30);
+    const blob = await new Promise(r => c.toBlob(r, 'image/png')); dt.items.add(new File([blob], 'x.png', { type: 'image/png' }));`));
+  eq(withImage, ['rect', 'image'], 'the picture from elsewhere was pasted, not the old mark');
+  const withMark = await b.evaluate(paste(`dt.setData('text/plain', 'KAM PDFs mark');`));
+  eq(withMark, ['rect', 'image', 'rect'], 'copying a mark here and pasting brings the mark');
+  const withText = await b.evaluate(paste(`dt.setData('text/plain', 'Text from an email');`));
+  eq(withText, ['rect', 'image', 'rect', 'text'], 'plain text from elsewhere arrives as a text box');
+  eq(await b.evaluate(`curAnnots().at(-1).text`), 'Text from an email', 'with the text in it');
+});
+
 test('the released version number is stated in one place only', async () => {
   const core = fs.readFileSync(path.join(ROOT, 'core.js'), 'utf8');
   const app = (core.match(/KAM_VERSION\s*=\s*'([^']+)'/) || [])[1];
@@ -1285,6 +1471,43 @@ print(sum(1 for p in img.getdata() if p < 160))
     if (r.status === 0) {
       const out = (r.stdout || '').trim();
       return out === 'SKIP' ? null : parseInt(out, 10);
+    }
+  }
+  return null;
+}
+
+/* PDFium's view of one region of a saved page: how many pixels are the red of a correction,
+   and how many are the pale blue a text field is painted with. null when PDFium is missing. */
+function pdfiumColours(buf, pageIndex, [x0, y0, x1, y1]) {
+  const tmp = path.join(os.tmpdir(), 'kam-pdfium-colours.pdf');
+  fs.writeFileSync(tmp, buf);
+  const script = `
+import sys
+try:
+    import pypdfium2 as pdfium
+except Exception:
+    print("SKIP"); sys.exit(0)
+d = pdfium.PdfDocument(sys.argv[1])
+try: d.init_forms()
+except Exception: pass
+img = d[${pageIndex}].render(scale=1, may_draw_forms=True).to_pil().convert("RGB")
+red = blue = 0
+for x in range(${x0}, ${x1}, 2):
+    for y in range(${y0}, ${y1}, 2):
+        r, g, b = img.getpixel((x, y))
+        if r > 180 and g < 90 and b < 120: red += 1
+        if b > 230 and r < 235 and g > 200: blue += 1
+print(red, blue)
+`;
+  const sp = path.join(os.tmpdir(), 'kam-pdfium-colours.py');
+  fs.writeFileSync(sp, script);
+  for (const py of ['python', 'python3']) {
+    const r = spawnSync(py, [sp, tmp], { encoding: 'utf8' });
+    if (r.status === 0) {
+      const out = (r.stdout || '').trim();
+      if (out === 'SKIP') return null;
+      const [red, fieldBlue] = out.split(/\s+/).map(Number);
+      return { red, fieldBlue };
     }
   }
   return null;

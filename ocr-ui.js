@@ -24,7 +24,7 @@
         const { words } = await KamOcr.readPage(pi, s => setStatus(prefix + s));
         state.ocr[state.pageIds[pi]] = words;
         total += words.length;
-        state.dirty = true;
+        markChanged();
       }
       summarise();
       toast(total ? `Recognised ${total} words. The saved PDF will be searchable.` : 'No readable text found on that page.', 5000);

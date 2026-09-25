@@ -47,12 +47,69 @@ function downloadBytes(bytes, name, type = 'application/pdf') {
   document.body.appendChild(a); a.click(); a.remove();
   setTimeout(() => URL.revokeObjectURL(a.href), 10000);
 }
-function outName(suffix = '-edited') { return state.fileName.replace(/\.pdf$/i, '') + suffix + '.pdf'; }
+// "report-edited.pdf" saved again stays "report-edited.pdf", not "report-edited-edited.pdf"
+function outName(suffix = '-edited') {
+  const base = state.fileName.replace(/\.pdf$/i, '');
+  return (suffix === '-edited' ? base.replace(/-edited$/i, '') : base) + suffix + '.pdf';
+}
 function readFile(file) { return new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result); r.onerror = rej; r.readAsArrayBuffer(file); }); }
 function readDataUrl(file) { return new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result); r.onerror = rej; r.readAsDataURL(file); }); }
+let modalCloseHook = null;
 function showModal(html) { $('#modalBox').innerHTML = html; $('#modal').classList.add('show'); }
-function hideModal() { $('#modal').classList.remove('show'); $('#modalBox').innerHTML = ''; }
+function hideModal() {
+  $('#modal').classList.remove('show'); $('#modalBox').innerHTML = '';
+  const h = modalCloseHook; modalCloseHook = null; if (h) h();
+}
 $('#modal').addEventListener('click', e => { if (e.target.id === 'modal') hideModal(); });
+const modalOpen = () => $('#modal').classList.contains('show');
+
+/* A dialog with real choices, where confirm() only has OK and Cancel, and whose Cancel
+   sometimes meant "throw my work away". Resolves with the key of the button pressed, or
+   'cancel' for Escape or a click outside. Built with textContent, never HTML, because the
+   message often quotes a file name. */
+function choose({ title, message, buttons }) {
+  return new Promise(resolve => {
+    const box = $('#modalBox'); box.innerHTML = '';
+    const h = document.createElement('h3'); h.textContent = title; box.appendChild(h);
+    if (message) { const p = document.createElement('p'); p.className = 'choice-msg'; p.textContent = message; box.appendChild(p); }
+    const row = document.createElement('div'); row.className = 'row choice-row';
+    let done = false;
+    const finish = key => {
+      if (done) return; done = true;
+      document.removeEventListener('keydown', onKey, true);
+      modalCloseHook = null; hideModal(); resolve(key);
+    };
+    const onKey = e => { if (e.key === 'Escape') { e.preventDefault(); e.stopImmediatePropagation(); finish('cancel'); } };
+    for (const b of buttons) {
+      const el = document.createElement('button');
+      el.textContent = b.label; el.dataset.key = b.key;
+      if (b.primary) el.className = 'primary';
+      el.onclick = () => finish(b.key);
+      row.appendChild(el);
+    }
+    box.appendChild(row);
+    document.addEventListener('keydown', onKey, true);
+    modalCloseHook = () => finish('cancel');
+    $('#modal').classList.add('show');
+    const first = row.querySelector('.primary') || row.firstChild;
+    setTimeout(() => first && first.focus(), 0);
+  });
+}
+
+/* Before anything replaces the open document: if it has changes that are not saved, ask.
+   Returns true when it is fine to go ahead. Opening a file used to just do it, and three
+   seconds later the working copy was overwritten too, so the work could not be got back. */
+async function keepOrDiscard(what) {
+  if (!state.doc || !state.dirty) return true;
+  const c = await choose({
+    title: `Save changes to “${state.fileName}”?`,
+    message: `You have changes that are not saved. If you ${what} without saving, they will be lost.`,
+    buttons: [{ key: 'save', label: 'Save', primary: true }, { key: 'discard', label: "Don't save" }, { key: 'cancel', label: 'Cancel' }],
+  });
+  if (c === 'discard') return true;
+  if (c === 'save') { await savePdf(false); return !state.dirty; }
+  return false;
+}
 function targetPages() { // pages that sidebar actions apply to
   const s = [...state.selectedPages].filter(i => i < state.pageIds.length).sort((a, b) => a - b);
   return s.length ? s : [state.cur];
@@ -67,8 +124,12 @@ async function openBytes(bytes, name) {
     if (doc.getPageCount() === 0) throw new Error('The PDF has no pages.');
     state.doc = doc; state.fileName = name || 'document.pdf';
     state.pageIds = doc.getPages().map(() => uid());
-    state.annots = {}; state.undo = []; state.thumbCache.clear();
+    state.annots = {}; state.undo = []; state.redo = []; state.thumbCache.clear();
+    if (state.ocr) state.ocr = {};
     state.cur = 0; state.selectedPages.clear(); state.selected = null;
+    // a document fresh off the disk has nothing unsaved, whatever the last one had
+    state.rev = state.savedRev = newRev(); state.dirty = false;
+    if (typeof pdfTextClearPick === 'function') pdfTextClearPick();
     if (typeof resetSaveTarget === 'function') resetSaveTarget();
     await rebuild();
     $('#empty').classList.add('hide');
@@ -89,7 +150,11 @@ async function newBlank() {
 async function rebuild() {
   const bytes = await state.doc.save();
   state.bytes = bytes;
-  if (state.pdfjs) { try { state.pdfjs.destroy(); } catch (e) { } }
+  // Let go of the previous copy a little later rather than at once: a save, a thumbnail or a
+  // search already under way may still be reading it, and pulling it from under them made
+  // them fail with "Cannot read properties of null".
+  const old = state.pdfjs;
+  if (old) setTimeout(() => { try { old.destroy(); } catch (e) { } }, 15000);
   state.pdfjs = await pdfjsLib.getDocument({ data: bytes.slice() }).promise;
   if (state.cur >= state.pageIds.length) state.cur = Math.max(0, state.pageIds.length - 1);
   state.selected = null;
@@ -101,9 +166,14 @@ async function rebuild() {
 
 /* ---------- main page rendering ---------- */
 async function renderPage() {
-  const canvas = $('#pageCanvas'), overlay = $('#overlay'), wrap = $('#pageWrap');
-  if (!state.pdfjs || !state.pageIds.length) { wrap.style.width = wrap.style.height = '0px'; return; }
   const pdf = state.pdfjs;
+  // A page change can replace the document while this is still drawing the old one; the old
+  // copy is then gone, and whatever it throws is no longer of interest to anyone.
+  try { await renderPageOf(pdf); } catch (e) { if (pdf === state.pdfjs) console.error(e); }
+}
+async function renderPageOf(pdf) {
+  const canvas = $('#pageCanvas'), overlay = $('#overlay'), wrap = $('#pageWrap');
+  if (!pdf || !state.pageIds.length) { wrap.style.width = wrap.style.height = '0px'; return; }
   const page = await pdf.getPage(state.cur + 1);
   if (pdf !== state.pdfjs) return;
   const base = page.getViewport({ scale: 1 });
@@ -241,20 +311,30 @@ window.addEventListener('beforeunload', e => { if (state.dirty) { e.preventDefau
 
 /* ---------- file inputs & drag/drop ---------- */
 $('#btnOpen').onclick = $('#btnOpen2').onclick = () => $('#fileInput').click();
-$('#btnNew').onclick = $('#btnNew2').onclick = () => newBlank();
+$('#btnNew').onclick = $('#btnNew2').onclick = async () => { if (await keepOrDiscard('start a new document')) await newBlank(); };
 $('#fileInput').addEventListener('change', async e => {
   const f = e.target.files[0]; e.target.value = '';
-  if (f) await openBytes(await readFile(f), f.name);
+  if (!f) return;
+  if (!(await keepOrDiscard('open another file'))) return;
+  await openBytes(await readFile(f), f.name);
 });
 async function handleDroppedFiles(files) {
   const pdfs = files.filter(f => /\.pdf$/i.test(f.name) || f.type === 'application/pdf');
   const imgs = files.filter(f => f.type.startsWith('image/'));
   if (pdfs.length) {
     if (!state.doc) { await openBytes(await readFile(pdfs[0]), pdfs[0].name); if (pdfs.length > 1) await mergeFiles(pdfs.slice(1)); }
-    else if (confirm('Append the dropped PDF(s) to the current document?\n(Cancel to open instead and discard current edits.)')) await mergeFiles(pdfs);
-    else await openBytes(await readFile(pdfs[0]), pdfs[0].name);
+    else {
+      const names = pdfs.length === 1 ? `“${pdfs[0].name}”` : `${pdfs.length} PDFs`;
+      const c = await choose({
+        title: `Add ${names} to this document?`,
+        message: `The pages can go at the end of “${state.fileName}”, or you can open ${pdfs.length === 1 ? 'it' : 'the first one'} on its own instead.`,
+        buttons: [{ key: 'add', label: 'Add pages', primary: true }, { key: 'open', label: 'Open instead' }, { key: 'cancel', label: 'Cancel' }],
+      });
+      if (c === 'add') await mergeFiles(pdfs);
+      else if (c === 'open' && await keepOrDiscard('open another file')) await openBytes(await readFile(pdfs[0]), pdfs[0].name);
+    }
   }
-  if (imgs.length) { if (!state.doc) { await newBlank(); await addImagePages(imgs); await deletePages([0]); } else await addImagePages(imgs); }
+  if (imgs.length) { if (!state.doc) { await newBlank(); await addImagePages(imgs); await deletePages([0]); state.undo = []; } else await addImagePages(imgs); }
 }
 let dragDepth = 0;
 window.addEventListener('dragenter', e => { if (e.dataTransfer.types.includes('Files')) { dragDepth++; $('#drop').classList.add('show'); } });
@@ -488,40 +568,72 @@ $$('.tabs button').forEach(b => b.onclick = () => {
   $$('.tab').forEach(t => t.classList.toggle('active', t.id === 'tab-' + b.dataset.tab));
 });
 
-/* ---------- undo ---------- */
-function pushUndo(entry) { state.undo.push(entry); if (state.undo.length > 25) state.undo.shift(); state.redo = []; state.dirty = true; if (typeof noteChange === 'function') noteChange(); }
+/* ---------- undo ----------
+   Every change gets a revision number, and saving remembers which one is on disk. "Unsaved"
+   then means "not the revision that was saved", so undoing back to exactly what you saved
+   clears the dot again, and undoing past a save brings it back. A plain true/false flag got
+   both of those wrong. */
+let revCounter = 0;
+function newRev() { return ++revCounter; }
+state.rev = state.savedRev = newRev();
+function syncDirty() { state.dirty = !!state.doc && state.rev !== state.savedRev; }
+function markChanged() { state.rev = newRev(); syncDirty(); if (typeof noteChange === 'function') noteChange(); }
+function pushUndo(entry) {
+  entry.rev = state.rev;
+  state.undo.push(entry); if (state.undo.length > 25) state.undo.shift();
+  state.redo = [];
+  markChanged();
+}
+// Take back an undo entry that turned out not to be needed (a shape too small to keep, a
+// page operation that failed), as though it had never been pushed.
+function dropLastUndo() {
+  const e = state.undo.pop();
+  if (e) { state.rev = e.rev; syncDirty(); }
+}
 function snapshotAnnots(pageIds) {
   const pages = {}; for (const id of pageIds) pages[id] = JSON.stringify(state.annots[id] || []);
   return { kind: 'annot', pages };
 }
 function pushAnnotUndo(pageId) { pushUndo(snapshotAnnots([pageId])); }
-function pushStructUndo() {
-  pushUndo({ kind: 'struct', bytes: state.bytes, pageIds: [...state.pageIds], annots: JSON.parse(JSON.stringify(state.annots)), cur: state.cur });
+function structSnapshot() {
+  return { kind: 'struct', bytes: state.bytes, pageIds: [...state.pageIds], annots: JSON.parse(JSON.stringify(state.annots)), cur: state.cur };
+}
+function pushStructUndo() { pushUndo(structSnapshot()); }
+async function restoreStruct(e) {
+  busy(true);
+  try {
+    state.doc = await PDFDocument.load(e.bytes, { ignoreEncryption: true, updateMetadata: false });
+    state.pageIds = e.pageIds; state.annots = e.annots; state.cur = e.cur;
+    state.selectedPages.clear(); state.thumbCache.clear();
+    await rebuild(); loadFormFields(); loadMetadata();
+  } catch (err) { console.error(err); toast('Could not restore that step: ' + err.message); }
+  busy(false);
+}
+// The mirror image of an entry: what to push on the other stack so the step can be reversed.
+function counterpart(e) {
+  const c = e.kind === 'annot' ? snapshotAnnots(Object.keys(e.pages)) : structSnapshot();
+  c.rev = state.rev;
+  return c;
+}
+async function applyEntry(e) {
+  if (e.kind === 'annot') {
+    for (const id in e.pages) state.annots[id] = JSON.parse(e.pages[id]);
+    state.selected = null; drawOverlay(); refreshThumb(state.cur); updateProps();
+  } else await restoreStruct(e);
+  state.rev = e.rev; syncDirty();
+  if (typeof noteChange === 'function') noteChange();
 }
 async function undo() {
   commitTextEdit();
   const e = state.undo.pop(); if (!e) { toast('Nothing to undo'); return; }
-  if (e.kind === 'annot') {
-    state.redo.push(snapshotAnnots(Object.keys(e.pages)));
-    for (const id in e.pages) state.annots[id] = JSON.parse(e.pages[id]);
-    state.selected = null; drawOverlay(); refreshThumb(state.cur); updateProps();
-  } else {
-    busy(true);
-    try {
-      state.doc = await PDFDocument.load(e.bytes, { ignoreEncryption: true, updateMetadata: false });
-      state.pageIds = e.pageIds; state.annots = e.annots; state.cur = e.cur;
-      state.selectedPages.clear(); state.thumbCache.clear();
-      await rebuild(); loadFormFields(); loadMetadata();
-    } catch (err) { console.error(err); toast('Undo failed: ' + err.message); }
-    busy(false);
-  }
+  state.redo.push(counterpart(e));
+  await applyEntry(e);
 }
-function redo() {
+async function redo() {
   commitTextEdit();
   const e = state.redo.pop(); if (!e) { toast('Nothing to redo'); return; }
-  state.undo.push(snapshotAnnots(Object.keys(e.pages)));
-  for (const id in e.pages) state.annots[id] = JSON.parse(e.pages[id]);
-  state.selected = null; drawOverlay(); refreshThumb(state.cur); updateProps();
+  state.undo.push(counterpart(e));
+  await applyEntry(e);
 }
 $('#btnUndo').onclick = undo;
 $('#btnRedo').onclick = redo;

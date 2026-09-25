@@ -23,7 +23,10 @@
     return { kind: 'Rectangle', detail: `${Math.round(a.w)} × ${Math.round(a.h)}` };
   }
 
-  const swatch = a => a.redact ? '#000000' : a.type === 'text' ? a.color : (a.fill || a.stroke || a.color || '#888');
+  const swatch = a => {
+    const c = a.redact ? '#000000' : a.type === 'text' ? a.color : (a.fill || a.stroke || a.color || '#888888');
+    return /^#[0-9a-f]{3,8}$/i.test(c || '') ? c : '#888888';
+  };
   // the same drawn icons as the rest of the app, rather than glyphs that render differently everywhere
   const icon = n => `<svg class="ic" aria-hidden="true"><use href="#i-${n}"/></svg>`;
 
@@ -66,12 +69,23 @@
         list.splice(i, 0, moved);
         updateProps(); drawOverlay(); refreshThumb(state.cur); render(true);
       });
-      row.innerHTML = `<span class="layer-dot" style="background:${swatch(a)}"></span>
-        <span class="layer-name"><b>${d.kind}</b> <span class="muted">${d.detail}</span></span>
-        <button class="layer-btn" data-act="eye" title="${a.hidden ? 'Show' : 'Hide'}" aria-label="${a.hidden ? 'Show' : 'Hide'}">${icon(a.hidden ? 'eye-off' : 'eye')}</button>
-        <button class="layer-btn" data-act="up" title="Bring forward" aria-label="Bring forward"${i === list.length - 1 ? ' disabled' : ''}>${icon('up')}</button>
-        <button class="layer-btn" data-act="down" title="Send back" aria-label="Send back"${i === 0 ? ' disabled' : ''}>${icon('down')}</button>
-        <button class="layer-btn" data-act="del" title="Delete" aria-label="Delete">${icon('trash')}</button>`;
+      // Built from text nodes, never HTML: the label quotes text that can come straight out of
+      // the PDF, and a PDF must never be able to put markup (or script) into the app.
+      const dot = document.createElement('span'); dot.className = 'layer-dot'; dot.style.background = swatch(a);
+      const name = document.createElement('span'); name.className = 'layer-name';
+      const kind = document.createElement('b'); kind.textContent = d.kind;
+      const detail = document.createElement('span'); detail.className = 'muted'; detail.textContent = d.detail;
+      name.append(kind, ' ', detail);
+      row.append(dot, name);
+      const btn = (act, label, ic, disabled) => {
+        const b = document.createElement('button'); b.className = 'layer-btn'; b.dataset.act = act;
+        b.title = label; b.setAttribute('aria-label', label); b.disabled = !!disabled; b.innerHTML = icon(ic);
+        row.appendChild(b);
+      };
+      btn('eye', a.hidden ? 'Show' : 'Hide', a.hidden ? 'eye-off' : 'eye');
+      btn('up', 'Bring forward', 'up', i === list.length - 1);
+      btn('down', 'Send back', 'down', i === 0);
+      btn('del', 'Delete', 'trash');
       row.onclick = e => {
         const act = e.target.dataset && e.target.dataset.act;
         if (!act) {                                   // clicking the row selects it on the page

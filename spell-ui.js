@@ -15,7 +15,7 @@
     if (KamSpell.ready) return true;
     setState('Loading dictionary…');
     const ok = await KamSpell.load();
-    if (!ok) { setState('Dictionary unavailable'); toast('Could not load the dictionary (dict/en.txt).', 5000); return false; }
+    if (!ok) { setState('Dictionary unavailable'); toast('Could not load the dictionary (dict/en.js).', 5000); return false; }
     setState(`${KamSpell.size.toLocaleString()} words loaded`);
     if (why !== 'quiet') toast('Spell check ready');
     drawOverlay();
@@ -110,7 +110,7 @@
       const n = KamSpell.mine.length;
       $('#spellMine').textContent = n ? `${n} word${n === 1 ? '' : 's'} in your dictionary` : '';
     }
-    if (!(await ensureDictionary('quiet'))) { $('#spellBody').innerHTML = '<div class="muted">Dictionary unavailable. Check that dict/en.txt is next to index.html.</div>'; return; }
+    if (!(await ensureDictionary('quiet'))) { $('#spellBody').innerHTML = '<div class="muted">Dictionary unavailable. Check that the dict folder is next to index.html.</div>'; return; }
     render(); updateMine();
   };
 })();

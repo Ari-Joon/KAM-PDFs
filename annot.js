@@ -407,7 +407,7 @@ function endDrag(e) {
   }
   const a = drag.a, list = curAnnots();
   if ((drag.mode === 'shape' && (a.w < 2 || a.h < 2)) || (drag.mode === 'line' && Math.hypot(a.pts[1][0] - a.pts[0][0], a.pts[1][1] - a.pts[0][1]) < 2)) {
-    list.splice(list.indexOf(a), 1); state.undo.pop();
+    list.splice(list.indexOf(a), 1); dropLastUndo();
   }
   drag = null; drawOverlay(); refreshThumb(state.cur);
 }
@@ -562,7 +562,19 @@ function nudge(key, d) {
   if (a.pts) a.pts = a.pts.map(p => [p[0] + dx, p[1] + dy]); else { a.x += dx; a.y += dy; }
   drawOverlay(); refreshThumb(state.cur);
 }
+/* Copying a mark puts a short marker on the system clipboard as well, so the clipboard stays
+   the one place that says what was copied last. Without it, a mark copied an hour ago beat a
+   picture you had just copied from somewhere else, because the app only looked at its own. */
+const CLIP_MARK = 'KAM PDFs mark';
+async function copyMark(a) {
+  state.clipboard = JSON.stringify(a);
+  try { await navigator.clipboard.writeText(CLIP_MARK); state.clipboardOnSystem = true; }
+  catch (e) { state.clipboardOnSystem = false; }        // no clipboard access: the app's own copy still works
+  toast('Copied');
+}
 document.addEventListener('keydown', e => {
+  if (modalOpen() || !$('#palette').hidden) return;     // shortcuts never reach the page from under a dialog
+  if ($('#busy').classList.contains('show')) { e.preventDefault(); return; }   // nor while a document is still opening or saving
   const typing = ['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement.tagName);
   const mod = e.ctrlKey || e.metaKey, k = e.key.toLowerCase();
   if (mod && k === 's') { e.preventDefault(); savePdf(e.shiftKey); return; }
@@ -572,9 +584,10 @@ document.addEventListener('keydown', e => {
   if (mod && k === 'z' && e.shiftKey) { e.preventDefault(); redo(); return; }
   if (mod && k === 'z') { e.preventDefault(); undo(); return; }
   if (mod && k === 'y') { e.preventDefault(); redo(); return; }
-  if (mod && k === 'c' && state.selected) { state.clipboard = JSON.stringify(state.selected); toast('Copied'); return; }
+  if (mod && k === 'c' && state.selected) { e.preventDefault(); copyMark(state.selected); return; }
   if (mod && k === 'c' && typeof pdfTextHasSelection === 'function' && pdfTextHasSelection()) { e.preventDefault(); pdfTextCopy(); return; }
-  if (mod && k === 'v' && state.clipboard) { e.preventDefault(); pasteAnnot(JSON.parse(state.clipboard)); return; }
+  // with the system clipboard in use, pasting is decided in the paste event below
+  if (mod && k === 'v' && state.clipboard && state.clipboardOnSystem === false) { e.preventDefault(); pasteAnnot(JSON.parse(state.clipboard)); return; }
   if (mod && k === 'd' && state.selected) { e.preventDefault(); pasteAnnot(JSON.parse(JSON.stringify(state.selected))); return; }
   if (e.key === 'Escape') { state.selected = null; if (typeof pdfTextClearPick === 'function') pdfTextClearPick(); setTool('select'); return; }
   if (e.key === 'Delete' || e.key === 'Backspace') {
@@ -588,11 +601,33 @@ document.addEventListener('keydown', e => {
   const map = { v: 'select', t: 'text', p: 'pen', h: 'highlight', r: 'rect', e: 'ellipse', l: 'line', a: 'arrow', w: 'whiteout', x: 'redact' };
   if (!mod && !e.altKey && map[k]) setTool(map[k]);
 });
-// Paste an image from the clipboard straight onto the page.
+// Paste whatever is on the clipboard: a picture, a mark copied here, or text from anywhere.
 document.addEventListener('paste', async e => {
-  if (!state.doc || ['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement.tagName)) return;
-  const item = [...((e.clipboardData && e.clipboardData.items) || [])].find(i => i.type.startsWith('image/'));
-  if (!item) return; e.preventDefault();
-  try { placeImage(await fileToImageAnnot(item.getAsFile())); toast('Image pasted onto the page'); } catch (err) { toast('Could not paste image'); }
+  if (!state.doc || modalOpen() || ['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement.tagName)) return;
+  const items = [...((e.clipboardData && e.clipboardData.items) || [])];
+  const img = items.find(i => i.type.startsWith('image/'));
+  const text = e.clipboardData ? e.clipboardData.getData('text/plain') : '';
+  if (img) {
+    e.preventDefault();
+    try { placeImage(await fileToImageAnnot(img.getAsFile())); toast('Image pasted onto the page'); } catch (err) { toast('Could not paste image'); }
+    return;
+  }
+  if (text === CLIP_MARK && state.clipboard) { e.preventDefault(); pasteAnnot(JSON.parse(state.clipboard)); return; }
+  if (text && text.trim()) {
+    // text copied from anywhere becomes a text box in the middle of what you can see
+    e.preventDefault();
+    const { w: W, h: H } = state.pageSize, vp = $('#viewport');
+    const cx = typeof visibleCentre === 'function' ? visibleCentre() : [W / 2, H / 2];
+    pushAnnotUndo(curPageId());
+    const a = { id: uid(), type: 'text', x: 0, y: 0, w: 0, h: 0, rot: 0, text: text.replace(/\r\n?/g, '\n').slice(0, 5000),
+                size: defaults.size, font: defaults.font, bold: defaults.bold, color: defaults.color, opacity: defaults.opacity };
+    measureText(a);
+    if (a.w > W * 0.8) { a.boxW = W * 0.8; measureText(a); }
+    a.x = Math.max(4, Math.min(W - a.w - 4, cx[0] - a.w / 2)); a.y = Math.max(4, Math.min(H - a.h - 4, cx[1] - a.h / 2));
+    curAnnots().push(a);
+    if (state.tool !== 'select') setTool('select');
+    state.selected = a; updateProps(); drawOverlay(); refreshThumb(state.cur);
+    toast('Pasted as a text box. Double-click it to edit.');
+  }
 });
 setTool('select');

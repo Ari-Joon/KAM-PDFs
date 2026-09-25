@@ -1,5 +1,5 @@
 /* KAM PDFs - spell checking for text you add to a page.
-   The dictionary (dict/en.txt) is fetched the first time it is needed, then cached by the
+   The dictionary (dict/en.js) is loaded the first time it is needed, then cached by the
    service worker so it keeps working offline. Words you add yourself live in localStorage. */
 'use strict';
 const KamSpell = (() => {
@@ -34,11 +34,25 @@ const KamSpell = (() => {
     try { localStorage.removeItem('kam-spell-ok'); } catch (e) { }
   }
 
+  // A script tag rather than fetch(): a copy unzipped into a folder runs from file://, where
+  // Chrome refuses fetch() even for the app's own files, so spell checking never worked there.
+  function loadScript(src) {
+    return new Promise((res, rej) => {
+      const s = document.createElement('script');
+      s.src = src; s.onload = () => res(); s.onerror = () => rej(new Error('could not load ' + src));
+      document.head.appendChild(s);
+    });
+  }
   function load() {
     if (loadPromise) return loadPromise;
     state = 'loading';
-    loadPromise = fetch('dict/en.txt')
-      .then(r => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.text(); })
+    loadPromise = (typeof window.KAM_DICT === 'string' ? Promise.resolve() : loadScript('dict/en.js'))
+      .then(() => {
+        const text = window.KAM_DICT;
+        if (typeof text !== 'string') throw new Error('the dictionary did not load');
+        window.KAM_DICT = null;                         // parsed below; no need to keep two copies
+        return text;
+      })
       .then(text => {
         const lines = text.split('\n');
         if (lines[0] !== 'KAMDICT1') throw new Error('unexpected dictionary format');
