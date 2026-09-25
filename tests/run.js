@@ -1318,6 +1318,74 @@ test('turning the pages of a big document does not fill memory, and undoes exact
   eq(await b.evaluate(`state.doc.getPage(0).getRotation().angle`), 90, 'the moved page is back in front');
 });
 
+/* ---------- password-protected PDFs ---------- */
+
+// Open a base64 PDF, answering the password dialog with each of `answers` in turn (null for
+// Cancel). Resolves to how many times the password was asked for.
+async function openLocked(b, b64, name, answers) {
+  await b.evaluate(`(() => { window.__opened = false; const s = atob(${JSON.stringify(b64)}); const u = new Uint8Array(s.length);
+    for (let i = 0; i < s.length; i++) u[i] = s.charCodeAt(i);
+    openBytes(u.buffer, ${JSON.stringify(name)}).then(() => { window.__opened = true; }); return 1; })()`);
+  let asked = 0;
+  for (const answer of answers) {
+    await b.waitFor(`!!document.getElementById('pdfPassword') || window.__opened`, 20000);
+    if (await b.evaluate(`window.__opened`)) break;
+    asked++;
+    if (answer === null) await b.evaluate(`(() => { [...document.querySelectorAll('#modalBox button')].find(x => x.textContent === 'Cancel').click(); return 1; })()`);
+    else await b.evaluate(`(() => { const i = document.getElementById('pdfPassword'); i.value = ${JSON.stringify(answer)}; [...document.querySelectorAll('#modalBox button')].find(x => x.textContent === 'Open').click(); return 1; })()`);
+    await b.waitFor(`!document.getElementById('pdfPassword') || document.querySelector('.choice-msg').textContent.includes('not right') || window.__opened`, 20000);
+    await sleep(100);
+  }
+  await b.waitFor(`window.__opened`, 30000);
+  return asked;
+}
+
+test('password-protected PDFs open, with or without asking, and save unprotected', async b => {
+  const dir = path.join(__dirname, 'fixtures');
+  const cases = [
+    ['r2-owner', []],                                   // restrictions only: opens straight away
+    ['r3-user', ['kam-user']],
+    ['r4-aes-objstm', ['wrong one', 'kam-user']],       // a wrong password is asked again
+    ['r6-aes256', ['pässwörd']],                        // 256-bit AES, a password with accents
+    ['r6-owner', []],
+  ];
+  for (const [name, answers] of cases) {
+    await b.reload();
+    const b64 = fs.readFileSync(path.join(dir, `enc-${name}.pdf`)).toString('base64');
+    const asked = await openLocked(b, b64, name + '.pdf', answers);
+    eq(asked, answers.length, `${name}: asked for the password ${answers.length} time(s)`);
+    await b.waitFor(settled);
+    const shown = await b.evaluate(`state.pdfjs.getPage(1).then(p => p.getTextContent()).then(t => t.items.map(i => i.str).join(''))`);
+    eq(shown, `Secret line ${name}`, `${name}: the page reads right once unlocked`);
+    eq(await b.evaluate(`state.doc.getTitle()`), `Title of ${name}`, `${name}: its title reads right too`);
+    // edit it, save it: the copy opens anywhere without a password
+    await b.evaluate(editPhrase('Secret', `Edited line ${name}`));
+    await b.waitFor(settled);
+    const saved = await b.evaluate(exportBase64);
+    const buf = Buffer.from(saved, 'base64');
+    ok(!/\/Encrypt\b/.test(buf.toString('latin1')), `${name}: the saved copy is still marked as encrypted`);
+    eq((await b.evaluate(textOf(saved)))[0], `Edited line ${name}`, `${name}: the saved copy reads right`);
+    const fium = pdfiumText(buf);
+    if (fium !== null) eq(fium.trim(), `Edited line ${name}`, `${name}: PDFium opens the saved copy without a password`);
+  }
+  // Cancel leaves the document that was open alone
+  await b.reload();
+  await b.evaluate(makeDoc(`doc.addPage([420, 300]).drawText('Already open', { x: 30, y: 250, size: 14, font: f });`));
+  await b.waitFor(settled);
+  await openLocked(b, fs.readFileSync(path.join(dir, 'enc-r3-user.pdf')).toString('base64'), 'locked.pdf', [null]);
+  eq(await b.evaluate(`state.pdfjs.getPage(1).then(p => p.getTextContent()).then(t => t.items.map(i => i.str).join(''))`), 'Already open', 'cancelling keeps the document that was open');
+  ok(/needs its password/.test(await b.evaluate(`document.getElementById('toast').textContent`)), 'and says why the other one did not open');
+});
+
+test('the checksum used for PDF passwords is computed correctly', async b => {
+  await b.reload();
+  // RFC 1321 test vectors
+  const md5 = s => b.evaluate(`Array.from(KamCrypt.md5(new TextEncoder().encode(${JSON.stringify(s)})), v => v.toString(16).padStart(2, '0')).join('')`);
+  eq(await md5(''), 'd41d8cd98f00b204e9800998ecf8427e', 'MD5 of nothing');
+  eq(await md5('abc'), '900150983cd24fb0d6963f7d28e17f72', 'MD5 of "abc"');
+  eq(await md5('12345678901234567890123456789012345678901234567890123456789012345678901234567890'), '57edf4a22be3c955ac49da2e2107b67a', 'MD5 of 80 digits');
+});
+
 test('shift constrains shapes and lines', async b => {
   await b.reload();
   await b.evaluate(makeDoc(`doc.addPage([420, 300]);`));

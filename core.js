@@ -117,11 +117,36 @@ function targetPages() { // pages that sidebar actions apply to
 }
 
 /* ---------- opening / rebuilding ---------- */
+/* Asks for the password of a protected PDF, in the app's own dialog (never stored). Resolves to
+   what was typed, or null for Cancel. `tries` is how many passwords have already been wrong. */
+function askPassword(name) {
+  return tries => new Promise(resolve => {
+    const wasBusy = $('#busy').classList.contains('show'); busy(false);
+    const box = $('#modalBox'); box.innerHTML = '';
+    const h = document.createElement('h3'); h.textContent = 'This PDF is locked with a password';
+    const p = document.createElement('p'); p.className = 'choice-msg';
+    p.textContent = tries ? 'That password is not right. Check it and try again.' : `Enter the password to open “${name}”. It is only used here, on this computer, and is not kept.`;
+    const input = document.createElement('input'); input.type = 'password'; input.id = 'pdfPassword'; input.autocomplete = 'off'; input.style.width = '100%';
+    const row = document.createElement('div'); row.className = 'row choice-row';
+    const cancel = document.createElement('button'); cancel.textContent = 'Cancel';
+    const ok = document.createElement('button'); ok.textContent = 'Open'; ok.className = 'primary';
+    row.append(cancel, ok); box.append(h, p, input, row);
+    let done = false;
+    const finish = v => { if (done) return; done = true; modalCloseHook = null; hideModal(); if (wasBusy) busy(true); resolve(v); };
+    ok.onclick = () => finish(input.value);
+    cancel.onclick = () => finish(null);
+    input.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); finish(input.value); } if (e.key === 'Escape') { e.preventDefault(); finish(null); } e.stopPropagation(); });
+    modalCloseHook = () => finish(null);
+    $('#modal').classList.add('show');
+    setTimeout(() => input.focus(), 0);
+  });
+}
+
 async function openBytes(bytes, name) {
   busy(true);
   try {
-    const doc = await PDFDocument.load(bytes, { ignoreEncryption: true, updateMetadata: false });
-    if (doc.isEncrypted) throw new Error('This PDF is password-protected. Remove the password first (e.g. open it and "Print to PDF").');
+    // a password-protected PDF is unlocked here (crypt.js), asking for its password if it needs one
+    const { doc, locked } = await KamCrypt.open(bytes, askPassword(name || 'this PDF'));
     if (doc.getPageCount() === 0) throw new Error('The PDF has no pages.');
     state.doc = doc; state.fileName = name || 'document.pdf';
     state.pageIds = doc.getPages().map(() => uid());
@@ -135,8 +160,13 @@ async function openBytes(bytes, name) {
     await rebuild();
     $('#empty').classList.add('hide');
     loadFormFields(); loadMetadata();
-    toast(`Opened ${state.fileName} (${doc.getPageCount()} pages)`);
-  } catch (e) { console.error(e); toast('Could not open PDF: ' + e.message, 6000); }
+    if (locked === 'user') toast(`Unlocked ${state.fileName}. The copy you save will open without a password.`, 6000);
+    else if (locked === 'owner') toast(`${state.fileName} was protected against changes. It opens for editing here, and the copy you save is not protected.`, 7000);
+    else toast(`Opened ${state.fileName} (${doc.getPageCount()} pages)`);
+  } catch (e) {
+    if (e && e.cancelled) toast(`${name || 'The PDF'} was not opened: it needs its password.`, 5000);
+    else { console.error(e); toast('Could not open PDF: ' + e.message, 6000); }
+  }
   busy(false);
 }
 

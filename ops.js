@@ -153,8 +153,9 @@ async function mergeFiles(files) {
   let adopted = 0;
   await structOp(async () => {
     for (const f of files) {
-      const src = await PDFDocument.load(await readFile(f), { ignoreEncryption: true });
-      if (src.isEncrypted) { toast(`${f.name} is password-protected and was skipped`, 5000); continue; }
+      let src;
+      try { src = (await KamCrypt.open(await readFile(f), askPassword(f.name))).doc; }
+      catch (e) { if (e && e.cancelled) { toast(`${f.name} needs its password, and was left out`, 5000); continue; } throw e; }
       const pages = await state.doc.copyPages(src, src.getPageIndices());
       for (const p of pages) { state.doc.addPage(p); state.pageIds.push(uid()); }
       try { adopted += adoptFormFields(src, pages); } catch (e) { console.warn('could not adopt form fields', e); }
