@@ -16,6 +16,7 @@ const state = {
   bytes: null,          // bytes of the current structure (what pdf.js is showing)
   pageIds: [],          // stable id per page position (survives reorder)
   annots: {},           // pageId -> [annotation]
+  images: {},           // picture id -> { src, fmt, iw, ih }: pictures kept once, marks point at them
   cur: 0,
   selectedPages: new Set(),
   zoom: 1, fit: 'width',      // 'width' | 'page' | '' (manual)
@@ -124,7 +125,7 @@ async function openBytes(bytes, name) {
     if (doc.getPageCount() === 0) throw new Error('The PDF has no pages.');
     state.doc = doc; state.fileName = name || 'document.pdf';
     state.pageIds = doc.getPages().map(() => uid());
-    state.annots = {}; state.undo = []; state.redo = []; state.thumbCache.clear();
+    state.annots = {}; state.images = {}; state.undo = []; state.redo = []; state.thumbCache.clear();
     if (state.ocr) state.ocr = {};
     state.cur = 0; state.selectedPages.clear(); state.selected = null;
     // a document fresh off the disk has nothing unsaved, whatever the last one had
@@ -484,7 +485,27 @@ function pushUndo(entry) {
   entry.rev = state.rev;
   state.undo.push(entry); if (state.undo.length > 25) state.undo.shift();
   state.redo = [];
+  keepUndoWithinBudget();
   markChanged();
+}
+/* Page changes that cannot simply be done backwards (deleting pages, merging) keep a copy of the
+   whole document for undo. Those copies are held to a budget: past it, the oldest steps are let
+   go, so a long session with a large scan cannot run the computer out of memory. The most
+   recent step is always kept. */
+const UNDO_BUDGET = 200 * 1024 * 1024;
+function keepUndoWithinBudget() {
+  const size = () => {
+    const seen = new Set(); let n = 0;
+    for (const e of [...state.undo, ...state.redo]) if (e.bytes && !seen.has(e.bytes)) { seen.add(e.bytes); n += e.bytes.byteLength; }
+    return n;
+  };
+  let dropped = false;
+  while (size() > UNDO_BUDGET) {
+    const i = state.undo.findIndex(e => e.bytes);
+    if (i < 0 || i === state.undo.length - 1) break;
+    state.undo.splice(0, i + 1); dropped = true;
+  }
+  if (dropped) toast('The oldest steps can no longer be undone: keeping them would take too much memory for a document this size.', 5000);
 }
 // Take back an undo entry that turned out not to be needed (a shape too small to keep, a
 // page operation that failed), as though it had never been pushed.
@@ -513,7 +534,11 @@ async function restoreStruct(e) {
 }
 // The mirror image of an entry: what to push on the other stack so the step can be reversed.
 function counterpart(e) {
-  const c = e.kind === 'annot' ? snapshotAnnots(Object.keys(e.pages)) : structSnapshot();
+  let c;
+  if (e.kind === 'annot') c = snapshotAnnots(Object.keys(e.pages));
+  else if (e.kind === 'turn') c = { kind: 'turn', indices: e.indices, dir: -e.dir, pages: snapshotAnnots(e.indices.map(i => state.pageIds[i])).pages, cur: state.cur };
+  else if (e.kind === 'move') c = { kind: 'move', from: e.to, to: e.from, cur: state.cur };
+  else c = structSnapshot();
   c.rev = state.rev;
   return c;
 }
@@ -521,6 +546,16 @@ async function applyEntry(e) {
   if (e.kind === 'annot') {
     for (const id in e.pages) state.annots[id] = JSON.parse(e.pages[id]);
     state.selected = null; drawOverlay(); refreshThumb(state.cur); updateProps();
+  } else if (e.kind === 'turn' || e.kind === 'move') {
+    // done backwards rather than restored from a copy (see rotatePages in ops.js)
+    busy(true);
+    try {
+      if (e.kind === 'turn') await rotateNow(e.indices, e.dir); else moveNow(e.from, e.to);
+      if (e.pages) for (const id in e.pages) state.annots[id] = JSON.parse(e.pages[id]);   // the marks exactly as they were
+      state.cur = Math.min(e.cur, state.pageIds.length - 1); state.selectedPages.clear();
+      await rebuild();
+    } catch (err) { console.error(err); toast('Could not undo that step: ' + err.message); }
+    busy(false);
   } else await restoreStruct(e);
   state.rev = e.rev; syncDirty();
   if (typeof noteChange === 'function') noteChange();

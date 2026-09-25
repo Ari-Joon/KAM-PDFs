@@ -63,8 +63,9 @@ function measureText(a) {
   a.h = lines.length * a.size * 1.2;
 }
 function getImg(a) {
-  let img = imgCache.get(a.src);
-  if (!img) { img = new Image(); img.src = a.src; img.onload = () => { drawOverlay(); refreshThumb(state.cur); }; imgCache.set(a.src, img); }
+  const im = imageOf(a), key = a.img || (im && im.src) || '';
+  let img = imgCache.get(key);
+  if (!img) { img = new Image(); if (im) img.src = im.src; img.onload = () => { drawOverlay(); refreshThumb(state.cur); }; imgCache.set(key, img); }
   return img;
 }
 function arrowHead(a) {
@@ -514,20 +515,64 @@ function warnUnsaveable(a) {
 }
 
 /* ---------- images & signature ---------- */
+/* Pictures are kept once, in state.images, and marks point at them by id. A photo used to
+   live inside its mark as text, so every undo step, every copy and every working-copy save
+   carried another full copy of it: ten moves of a 5 MB photo held 126 MB. */
+function registerImage({ src, fmt, iw, ih }) {
+  for (const id in state.images) if (state.images[id].src === src) return id;     // the same picture twice: kept once
+  const id = 'img' + uid();
+  state.images[id] = { src, fmt, iw, ih };
+  state.imagesRev = (state.imagesRev || 0) + 1;
+  return id;
+}
+function imageOf(a) { return (a.img && state.images[a.img]) || (a.src ? { src: a.src, fmt: a.fmt } : null); }
+// A mark from before pictures were kept apart (a working copy, the clipboard) moves its picture in.
+function adoptImage(a) { if (a.type === 'image' && a.src && !a.img) { a.img = registerImage({ src: a.src, fmt: a.fmt, iw: a.iw, ih: a.ih }); delete a.src; } return a; }
+
+// Which way up a phone photo is meant to be (JPEG's EXIF orientation, 1 = as stored).
+function jpegOrientation(buf) {
+  try {
+    const v = new DataView(buf);
+    if (v.getUint16(0) !== 0xFFD8) return 1;
+    for (let p = 2; p + 10 < v.byteLength;) {
+      const marker = v.getUint16(p), len = v.getUint16(p + 2);
+      if ((marker & 0xFF00) !== 0xFF00) break;
+      if (marker === 0xFFE1 && v.getUint32(p + 4) === 0x45786966) {          // "Exif"
+        const t = p + 10, le = v.getUint16(t) === 0x4949, ifd = t + v.getUint32(t + 4, le);
+        for (let i = 0, n = v.getUint16(ifd, le); i < n; i++) { const e = ifd + 2 + i * 12; if (v.getUint16(e, le) === 0x0112) return v.getUint16(e + 8, le); }
+        return 1;
+      }
+      p += 2 + len;
+    }
+  } catch (e) { }
+  return 1;
+}
+/* A picture as it goes onto the page: no bigger than it can ever need to be (2400 pixels on its
+   long side prints a full A4 width at 290 dpi; a camera photo is often five times that, and it
+   all went into the saved file), and the right way up. A browser turns a phone photo upright
+   from its EXIF tag, but a PDF does not, so a portrait photo came out of the saved file lying
+   on its side: such photos are redrawn upright. */
 async function fileToImageAnnot(file) {
   const url = await readDataUrl(file);
   const img = await new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = rej; i.src = url; });
-  let src = url, fmt = 'png';
-  if (file.type === 'image/jpeg') fmt = 'jpg';
-  else if (file.type !== 'image/png') { const c = document.createElement('canvas'); c.width = img.naturalWidth; c.height = img.naturalHeight; c.getContext('2d').drawImage(img, 0, 0); src = c.toDataURL('image/png'); }
-  return { src, fmt, iw: img.naturalWidth, ih: img.naturalHeight };
+  const iw = img.naturalWidth, ih = img.naturalHeight, MAX = 2400;
+  const jpeg = file.type === 'image/jpeg', png = file.type === 'image/png';
+  const k = Math.min(1, MAX / Math.max(iw, ih));
+  const turned = jpeg && jpegOrientation(await file.arrayBuffer()) > 1;
+  if (k === 1 && !turned && (jpeg || png)) return { src: url, fmt: jpeg ? 'jpg' : 'png', iw, ih };
+  const c = document.createElement('canvas');
+  c.width = Math.max(1, Math.round(iw * k)); c.height = Math.max(1, Math.round(ih * k));
+  const g = c.getContext('2d'); g.imageSmoothingQuality = 'high';
+  g.drawImage(img, 0, 0, c.width, c.height);
+  return jpeg ? { src: c.toDataURL('image/jpeg', 0.92), fmt: 'jpg', iw: c.width, ih: c.height }
+              : { src: c.toDataURL('image/png'), fmt: 'png', iw: c.width, ih: c.height };
 }
 function placeImage({ src, fmt, iw, ih }, maxFrac = 0.4) {
   const { w: W, h: H } = state.pageSize;
   let w = Math.min(iw * 0.75, W * maxFrac); let h = w * ih / iw;
   if (h > H * maxFrac) { h = H * maxFrac; w = h * iw / ih; }
   pushAnnotUndo(curPageId());
-  const a = { id: uid(), type: 'image', x: (W - w) / 2, y: (H - h) / 2, w, h, rot: 0, src, fmt, opacity: 1 };
+  const a = { id: uid(), type: 'image', x: (W - w) / 2, y: (H - h) / 2, w, h, rot: 0, img: registerImage({ src, fmt, iw, ih }), opacity: 1 };
   curAnnots().push(a); setTool('select'); state.selected = a; updateProps(); drawOverlay(); refreshThumb(state.cur);
 }
 $('#btnImage').onclick = () => { if (!state.doc) return toast('Open a PDF first'); $('#imgAnnotInput').click(); };
@@ -597,7 +642,7 @@ $('#btnSign').onclick = () => {
 
 /* ---------- keyboard ---------- */
 function pasteAnnot(a) {
-  a.id = uid(); delete a._editing;
+  a.id = uid(); delete a._editing; adoptImage(a);
   if (a.pts) a.pts = a.pts.map(p => [p[0] + 15, p[1] + 15]); else { a.x += 15; a.y += 15; }
   pushAnnotUndo(curPageId()); curAnnots().push(a);
   if (state.tool !== 'select') setTool('select');

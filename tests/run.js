@@ -1223,6 +1223,101 @@ test('a working copy survives the window closing', async b => {
   eq(await b.evaluate(`KamDraft.get().then(d => d === null)`), true, 'Forget clears the stored copy');
 });
 
+/* ---------- memory: pictures, undo, the working copy ---------- */
+
+// A JPEG made in the page: `w` x `h`, red on the top half and blue on the bottom, optionally with
+// an EXIF orientation tag (6 = the camera was held upright: turn a quarter clockwise to show).
+const makeJpeg = (w, h, orientation) => `(async () => {
+  const c = document.createElement('canvas'); c.width = ${w}; c.height = ${h};
+  const g = c.getContext('2d'); g.fillStyle = '#e00000'; g.fillRect(0, 0, ${w}, ${h} / 2); g.fillStyle = '#0000e0'; g.fillRect(0, ${h} / 2, ${w}, ${h} / 2);
+  let bytes = new Uint8Array(await (await new Promise(r => c.toBlob(r, 'image/jpeg', 0.9))).arrayBuffer());
+  if (${orientation || 0}) {
+    // an APP1 "Exif" segment holding one tag, Orientation, straight after the start marker
+    const app1 = [0xFF, 0xE1, 0x00, 0x22, 0x45, 0x78, 0x69, 0x66, 0x00, 0x00, 0x4D, 0x4D, 0x00, 0x2A, 0x00, 0x00, 0x00, 0x08,
+      0x00, 0x01, 0x01, 0x12, 0x00, 0x03, 0x00, 0x00, 0x00, 0x01, 0x00, ${orientation || 0}, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00];
+    const out = new Uint8Array(bytes.length + app1.length); out.set(bytes.subarray(0, 2)); out.set(app1, 2); out.set(bytes.subarray(2), 2 + app1.length);
+    bytes = out;
+  }
+  return new File([bytes], 'photo.jpg', { type: 'image/jpeg' });
+})()`;
+
+test('a picture is kept once, however often it is moved, and no bigger than it needs to be', async b => {
+  await b.reload();
+  await b.evaluate(makeDoc(`doc.addPage([595, 842]);`));
+  await b.waitFor(settled);
+  const r = await b.evaluate(`(async () => {
+    const file = await ${makeJpeg(4800, 3600)};
+    placeImage(await fileToImageAnnot(file));
+    const a = curAnnots()[0];
+    for (let i = 0; i < 10; i++) { pushAnnotUndo(curPageId()); a.x += 5; }
+    const undoBytes = state.undo.reduce((n, e) => n + JSON.stringify(e).length, 0);
+    const im = state.images[a.img];
+    return { pictures: Object.keys(state.images).length, undoBytes, w: im.iw, h: im.ih, fileKB: Math.round(file.size / 1024), keptKB: Math.round(im.src.length * 3 / 4 / 1024), markHasPicture: 'src' in a };
+  })()`);
+  eq(r.pictures, 1, 'one picture kept');
+  eq(r.markHasPicture, false, 'the mark points at the picture instead of holding it');
+  ok(r.undoBytes < 20000, `ten moves should not copy the picture into undo: ${r.undoBytes} bytes`);
+  eq([r.w, r.h], [2400, 1800], 'a 4800 x 3600 photo is kept at 2400 pixels on its long side');
+  // a copy of the mark pastes the same picture, not another one
+  await b.evaluate(`(() => { state.clipboardOnSystem = false; state.clipboard = JSON.stringify(curAnnots()[0]); pasteAnnot(JSON.parse(state.clipboard)); return 1; })()`);
+  eq(await b.evaluate(`[Object.keys(state.images).length, curAnnots().length]`), [1, 2], 'pasting a picture reuses it');
+  // and the saved file holds it once
+  const saved = Buffer.from(await b.evaluate(exportBase64), 'base64').toString('latin1');
+  eq((saved.match(/\/Subtype\s*\/Image/g) || []).length, 1, 'the picture is in the saved file once');
+});
+
+test('a photo taken with the phone held upright is saved upright', async b => {
+  await b.reload();
+  await b.evaluate(makeDoc(`doc.addPage([595, 842]);`));
+  await b.waitFor(settled);
+  // stored 400 x 200 (red top, blue bottom), tagged "turn a quarter clockwise": shown 200 x 400,
+  // red on the right
+  const box = await b.evaluate(`(async () => { placeImage(await fileToImageAnnot(await ${makeJpeg(400, 200, 6)})); const a = curAnnots()[0]; return [a.x, a.y, a.w, a.h]; })()`);
+  ok(box[3] > box[2], `the picture should stand upright (taller than wide), got ${box[2].toFixed(0)} x ${box[3].toFixed(0)}`);
+  const saved = await b.evaluate(exportBase64);
+  const colours = await b.evaluate(`(async () => {
+    const s = atob(${JSON.stringify(saved)}); const u = new Uint8Array(s.length);
+    for (let i = 0; i < s.length; i++) u[i] = s.charCodeAt(i);
+    const p = await (await pdfjsLib.getDocument({ data: u }).promise).getPage(1); const vp = p.getViewport({ scale: 1 });
+    const c = document.createElement('canvas'); c.width = vp.width; c.height = vp.height; const g = c.getContext('2d');
+    await p.render({ canvasContext: g, viewport: vp }).promise;
+    const [x, y, w, h] = ${JSON.stringify(box)};
+    const at = (fx, fy) => Array.from(g.getImageData(Math.round(x + w * fx), Math.round(y + h * fy), 1, 1).data.slice(0, 3));
+    return { left: at(0.25, 0.5), right: at(0.75, 0.5) };
+  })()`);
+  ok(colours.right[0] > 150 && colours.right[2] < 100, `the right half should be red, as on screen: ${colours.right}`);
+  ok(colours.left[2] > 150 && colours.left[0] < 100, `the left half should be blue, as on screen: ${colours.left}`);
+});
+
+test('turning the pages of a big document does not fill memory, and undoes exactly', async b => {
+  await b.reload();
+  // a 3-page document with a large picture on every page, like a scan
+  await b.evaluate(`(async () => {
+    const { PDFDocument } = PDFLib; const doc = await PDFDocument.create();
+    const c = document.createElement('canvas'); c.width = 2000; c.height = 2800; const g = c.getContext('2d');
+    for (let i = 0; i < 4000; i++) { g.fillStyle = 'hsl(' + (i * 37 % 360) + ',60%,50%)'; g.fillRect((i * 97) % 2000, (i * 61) % 2800, 40, 40); }
+    const img = await doc.embedJpg(await (await new Promise(r => c.toBlob(r, 'image/jpeg', 0.95))).arrayBuffer());
+    for (let i = 0; i < 3; i++) doc.addPage([595, 842]).drawImage(img, { x: 0, y: 0, width: 595, height: 842 });
+    const bytes = await doc.save(); await openBytes(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength), 'scan.pdf'); return 1; })()`);
+  await b.waitFor(settled);
+  await b.evaluate(`(() => { const a = { id: uid(), type: 'rect', x: 100, y: 120, w: 200, h: 80, rot: 0, stroke: '#e11d48', fill: null, width: 3, opacity: 1 }; curAnnots().push(a); drawOverlay(); return 1; })()`);
+  const before = await b.evaluate(`JSON.stringify(curAnnots().map(a => [a.x, a.y, a.w, a.h, a.rot]))`);
+  for (let i = 0; i < 4; i++) { await b.evaluate(`rotatePages([0], 1)`); await b.waitFor(settled); }
+  const held = await b.evaluate(`state.undo.filter(e => e.bytes).length`);
+  eq(held, 0, 'turning pages should not keep copies of the document for undo');
+  eq(await b.evaluate(`state.undo.map(e => e.kind).join(',')`), 'turn,turn,turn,turn', 'each turn is one step');
+  for (let i = 0; i < 4; i++) { await b.evaluate(`undo()`); await b.waitFor(settled); }
+  eq(await b.evaluate(`state.doc.getPage(0).getRotation().angle`), 0, 'undone back to the start');
+  eq(await b.evaluate(`JSON.stringify(curAnnots().map(a => [a.x, a.y, a.w, a.h, a.rot]))`), before, 'the marks are back exactly where they were');
+  await b.evaluate(`redo()`); await b.waitFor(settled);
+  eq(await b.evaluate(`state.doc.getPage(0).getRotation().angle`), 90, 'and a turn can be redone');
+  // moving a page is undone by moving it back, too
+  await b.evaluate(`movePage(0, 2)`); await b.waitFor(settled);
+  eq(await b.evaluate(`state.undo[state.undo.length - 1].kind`), 'move', 'a move is kept as a move');
+  await b.evaluate(`undo()`); await b.waitFor(settled);
+  eq(await b.evaluate(`state.doc.getPage(0).getRotation().angle`), 90, 'the moved page is back in front');
+});
+
 test('shift constrains shapes and lines', async b => {
   await b.reload();
   await b.evaluate(makeDoc(`doc.addPage([420, 300]);`));
@@ -1258,6 +1353,49 @@ test('undo and redo step through changes', async b => {
   eq(await b.evaluate(`curAnnots().length`), 0, 'undo removed it');
   await b.evaluate(`redo()`);
   eq(await b.evaluate(`curAnnots().length`), 1, 'redo brought it back');
+});
+
+test('the phone keeps its pages through a reload, and only counts a page sent when it arrived', async b => {
+  // the phone's page, with a stand-in for the connection to the computer
+  const openScanPage = async () => {
+    await b.evaluate(`location.href = 'http://localhost:${PORT}/scan.html?t=' + Date.now(); 1`).catch(() => { });
+    await b.waitFor(`typeof sendAll === 'function' && typeof Store !== 'undefined' && document.readyState === 'complete'`);
+  };
+  await openScanPage();
+  await b.evaluate(`(async () => {
+    const shot = async colour => { const c = document.createElement('canvas'); c.width = 300; c.height = 400; const g = c.getContext('2d'); g.fillStyle = colour; g.fillRect(0, 0, 300, 400);
+      return new Promise(r => c.toBlob(r, 'image/jpeg', 0.8)); };
+    for (const colour of ['#c00', '#0c0', '#00c']) { const blob = await shot(colour); pages.push({ id: newId(), blob, url: URL.createObjectURL(blob), w: 300, h: 400, sent: false }); }
+    await Store.save(); renderPages(); return pages.length; })()`);
+  // the browser reloads the page (a call came in, it was closed in the background)
+  await openScanPage();
+  await b.waitFor(`pages.length === 3`, 5000);
+  eq(await b.evaluate(`pages.map(p => p.sent)`), [false, false, false], 'all three pages are back, still unsent');
+
+  // the computer confirms the first page, then goes quiet
+  const r = await b.evaluate(`(async () => {
+    window.KAM_SEND_WAIT = 400;
+    const got = [];
+    conn = { open: true, send: m => { got.push(m.id); if (got.length === 1) setTimeout(() => answer && answer({ type: 'ack', id: m.id }), 20); }, on: () => {} };
+    await sendAll();
+    return { sent: pages.map(p => p.sent), asked: got.length, toast: document.getElementById('toast').textContent };
+  })()`);
+  eq(r.sent, [true, false, false], 'only the confirmed page counts as sent');
+  ok(/did not arrive/.test(r.toast) && /tap Send to try again/.test(r.toast), `the phone should say what happened: ${r.toast}`);
+  // the computer refuses the next one
+  const r2 = await b.evaluate(`(async () => {
+    conn = { open: true, send: m => setTimeout(() => answer && answer({ type: 'nack', id: m.id, reason: 'no room' }), 20), on: () => {} };
+    await sendAll();
+    return { sent: pages.map(p => p.sent), toast: document.getElementById('toast').textContent };
+  })()`);
+  eq(r2.sent, [true, false, false], 'a refused page stays unsent');
+  ok(/could not add page 2 \(no room\)/.test(r2.toast), `the reason is passed on: ${r2.toast}`);
+  // and when all goes well, the rest go through, and it is remembered
+  await b.evaluate(`(async () => { conn = { open: true, send: m => setTimeout(() => answer && answer({ type: 'ack', id: m.id }), 10), on: () => {} }; await sendAll(); return 1; })()`);
+  await openScanPage();
+  await b.waitFor(`pages.length === 3`, 5000);
+  eq(await b.evaluate(`pages.map(p => p.sent)`), [true, true, true], 'sent pages are remembered as sent');
+  await b.evaluate(`(async () => { pages.length = 0; await Store.save(); return 1; })()`);
 });
 
 test('the scanner finds the page in a photo', async b => {

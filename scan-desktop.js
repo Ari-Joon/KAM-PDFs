@@ -4,6 +4,7 @@
   const SCAN_PAGE = (location.protocol.startsWith('http') ? location.href.replace(/[#?].*$/, '').replace(/[^/]*$/, '') : 'https://ari-joon.github.io/KAM-PDFs/') + 'scan.html';
   const ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
   let peer = null, stream = null, received = 0;
+  const gotIds = new Set();              // pages already added this session, by the phone's id for them
 
   function makeCode() { const a = new Uint8Array(6); crypto.getRandomValues(a); return [...a].map(v => ALPHABET[v % ALPHABET.length]).join(''); }
   function setStatus(msg, cls) { const el = $('#scanStatus'); if (!el) return; el.textContent = msg; el.className = 'muted ' + (cls || ''); }
@@ -27,14 +28,21 @@
       setStatus('Phone connected. Take photos on the phone and tap Send.', 'ok');
       conn.on('data', async d => {
         if (!d || d.type !== 'page') return;
+        // The phone only counts a page as sent once this says it has it, and sends it again
+        // otherwise; a page already added (its confirmation lost on the way) is just confirmed.
+        if (d.id && gotIds.has(d.id)) { conn.send({ type: 'ack', i: d.i, id: d.id }); return; }
         try {
           setStatus(`Receiving page ${d.k + 1} of ${d.n}…`, 'ok');
           const file = new File([d.data], `scan-${Date.now()}.jpg`, { type: 'image/jpeg' });
           await addScannedPages([file]);
-          conn.send({ type: 'ack', i: d.i });
+          if (d.id) gotIds.add(d.id);
+          conn.send({ type: 'ack', i: d.i, id: d.id });
           setStatus(d.k + 1 === d.n ? `Received ${d.n} page${d.n > 1 ? 's' : ''}. Phone still connected.` : `Receiving page ${d.k + 2} of ${d.n}…`, 'ok');
           toast(`Scanned page ${d.k + 1} of ${d.n} added`);
-        } catch (e) { console.error(e); setStatus('Failed to add page: ' + e.message, 'err'); }
+        } catch (e) {
+          console.error(e); setStatus('Failed to add page: ' + e.message, 'err');
+          try { conn.send({ type: 'nack', i: d.i, id: d.id, reason: e.message }); } catch (err) { }
+        }
       });
       conn.on('close', () => setStatus('Phone disconnected. Reopen scan.html on the phone to reconnect.'));
     });

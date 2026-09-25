@@ -2,10 +2,15 @@
    The document and everything you have added are kept in this browser's own storage on this
    computer. Nothing is uploaded, and Forget removes it. */
 'use strict';
+/* The copy is kept in three parts: the document's bytes, the pictures you added, and a small
+   record of everything else (your marks, the page you were on). Only the record changes with
+   every edit; the bytes are written again only when the pages themselves change, and the
+   pictures only when you add one. Writing a 46 MB scan back to disk three seconds after every
+   pen stroke was most of what made large documents feel slow. All the parts that change go
+   in one transaction, so a copy is never half old and half new. */
 const KamDraft = (() => {
-  const DB = 'kam-pdfs', STORE = 'draft', KEY = 'current';
-  const MAX_BYTES = 80 * 1024 * 1024;
-  let dbp = null;
+  const DB = 'kam-pdfs', STORE = 'draft', KEY = 'current', BYTES = 'bytes', IMAGES = 'images';
+  let dbp = null, wroteBytes = null, wroteImages = null;
 
   function open() {
     if (dbp) return dbp;
@@ -17,31 +22,50 @@ const KamDraft = (() => {
     }).catch(e => { console.warn('draft storage unavailable', e); return null; });
     return dbp;
   }
-  async function put(value) {
+  async function write(entries) {
     const db = await open(); if (!db) return false;
     return new Promise(res => {
-      const tx = db.transaction(STORE, 'readwrite');
-      tx.objectStore(STORE).put(value, KEY);
+      const tx = db.transaction(STORE, 'readwrite'), st = tx.objectStore(STORE);
+      for (const [k, v] of entries) st.put(v, k);
       tx.oncomplete = () => res(true); tx.onerror = () => res(false); tx.onabort = () => res(false);
     });
   }
-  async function get() {
-    const db = await open(); if (!db) return null;
+  async function read(keys) {
+    const db = await open(); if (!db) return keys.map(() => null);
     return new Promise(res => {
-      const tx = db.transaction(STORE, 'readonly');
-      const rq = tx.objectStore(STORE).get(KEY);
-      rq.onsuccess = () => res(rq.result || null); rq.onerror = () => res(null);
+      const tx = db.transaction(STORE, 'readonly'), st = tx.objectStore(STORE), out = [];
+      keys.forEach((k, i) => { const rq = st.get(k); rq.onsuccess = () => { out[i] = rq.result || null; }; });
+      tx.oncomplete = () => res(out); tx.onerror = () => res(keys.map(() => null));
     });
+  }
+  // `bytes` is the document as it stands (only written when it is not the one written last
+  // time); `images` the pictures; `record` everything else.
+  async function save({ bytes, images, imagesSig, record }) {
+    const entries = [];
+    if (bytes !== wroteBytes) entries.push([BYTES, bytes.slice().buffer]);
+    if (imagesSig !== wroteImages) entries.push([IMAGES, images]);
+    entries.push([KEY, record]);
+    const ok = await write(entries);
+    if (ok) { wroteBytes = bytes; wroteImages = imagesSig; }
+    return ok;
+  }
+  // The whole copy, put back together (a copy from before it was kept in parts has its bytes in
+  // the record itself).
+  async function get() {
+    const [record, bytes, images] = await read([KEY, BYTES, IMAGES]);
+    if (!record) return null;
+    return { ...record, bytes: record.bytes || bytes, images: record.images || images || {} };
   }
   async function clear() {
     const db = await open(); if (!db) return;
+    wroteBytes = null; wroteImages = null;
     await new Promise(res => {
-      const tx = db.transaction(STORE, 'readwrite');
-      tx.objectStore(STORE).delete(KEY);
+      const tx = db.transaction(STORE, 'readwrite'), st = tx.objectStore(STORE);
+      for (const k of [KEY, BYTES, IMAGES]) st.delete(k);
       tx.oncomplete = res; tx.onerror = res; tx.onabort = res;
     });
   }
-  return { put, get, clear };
+  return { save, get, clear };
 })();
 
 (() => {
@@ -66,10 +90,14 @@ const KamDraft = (() => {
     saving = true;
     let okd = false;
     try {
-      const bytes = state.bytes.slice().buffer;
       const annots = state.pageIds.map(id => state.annots[id] || []);
       const ocr = state.pageIds.map(id => (state.ocr && state.ocr[id]) || []);
-      okd = await KamDraft.put({ fileName: state.fileName, bytes, annots, ocr, cur: state.cur, savedAt: Date.now(), v: 1 });
+      // only the pictures still used somewhere (undo can bring a deleted one back, but not
+      // once the window is closed)
+      const used = new Set(); for (const list of annots) for (const a of list) if (a.img) used.add(a.img);
+      const images = {}; for (const id of used) if (state.images[id]) images[id] = state.images[id];
+      okd = await KamDraft.save({ bytes: state.bytes, images, imagesSig: [...used].sort().join(','),
+        record: { fileName: state.fileName, annots, ocr, cur: state.cur, savedAt: Date.now(), v: 2 } });
       if (okd) { lastSaved = Date.now(); setState('Working copy kept ' + when(lastSaved)); }
     } catch (e) { console.warn('could not keep a working copy', e); }
     saving = false;
@@ -92,6 +120,8 @@ const KamDraft = (() => {
       await openBytes(draft.bytes, draft.fileName || 'restored.pdf');
       if (!state.doc) throw new Error('the working copy could not be opened');
       let maxId = 0;
+      state.images = { ...(draft.images || {}) };
+      for (const id in state.images) { const n = parseInt(String(id).replace(/^img/, ''), 10); if (n > maxId) maxId = n; }
       state.pageIds.forEach((id, i) => {
         const list = (draft.annots && draft.annots[i]) || [];
         state.annots[id] = list;
@@ -99,6 +129,7 @@ const KamDraft = (() => {
         if (state.ocr) state.ocr[id] = (draft.ocr && draft.ocr[i]) || [];
       });
       state.nextId = Math.max(state.nextId, maxId + 1);
+      for (const id of state.pageIds) for (const a of state.annots[id]) adoptImage(a);    // a copy made before pictures were kept apart
       markChanged();                  // a restored session has changes the file on disk does not
       state.cur = Math.min(draft.cur || 0, state.pageIds.length - 1);
       await goTo(state.cur);

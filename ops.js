@@ -1,10 +1,12 @@
 /* Free PDF Editor — page operations, forms, metadata, export */
 'use strict';
 
-async function structOp(fn, { clearThumbs = false } = {}) {
+// `undo`, if given, is the step that takes it back (see rotatePages): cheaper to keep than a
+// copy of the whole document, which is what is kept otherwise.
+async function structOp(fn, { clearThumbs = false, undo = null } = {}) {
   if (!state.doc) { toast('Open a PDF first'); return; }
   commitTextEdit();
-  pushStructUndo();
+  if (undo) pushUndo(typeof undo === 'function' ? undo() : undo); else pushStructUndo();
   busy(true);
   try { await fn(); if (clearThumbs) state.thumbCache.clear(); await rebuild(); }
   catch (e) { console.error(e); dropLastUndo(); toast('Operation failed: ' + e.message, 5000); }
@@ -19,17 +21,22 @@ function rotateAnnots90(pageId, dispW, dispH) {
     else { [a.x, a.y] = rot([a.x, a.y]); a.rot = (a.rot + 90) % 360; }
   }
 }
+async function rotateNow(indices, dir) {
+  for (const i of indices) {
+    const page = state.doc.getPage(i);
+    const vp = (await state.pdfjs.getPage(i + 1)).getViewport({ scale: 1 });
+    let w = vp.width, h = vp.height;
+    const steps = dir > 0 ? 1 : 3;
+    for (let k = 0; k < steps; k++) { rotateAnnots90(state.pageIds[i], w, h); [w, h] = [h, w]; }
+    page.setRotation(degrees((((page.getRotation().angle + dir * 90) % 360) + 360) % 360));
+  }
+}
+/* Undoing a turn is turning back, and undoing a move is moving back: kept as that, not as a copy
+   of the document. Three turns of a 46 MB scan used to hold 132 MB for undo. The marks on the
+   turned pages are kept too (a few bytes), so they come back exactly where they were. */
+const turnStep = (indices, dir) => ({ kind: 'turn', indices: [...indices], dir, pages: snapshotAnnots(indices.map(i => state.pageIds[i])).pages, cur: state.cur });
 async function rotatePages(indices, dir) {
-  await structOp(async () => {
-    for (const i of indices) {
-      const page = state.doc.getPage(i);
-      const vp = (await state.pdfjs.getPage(i + 1)).getViewport({ scale: 1 });
-      let w = vp.width, h = vp.height;
-      const steps = dir > 0 ? 1 : 3;
-      for (let k = 0; k < steps; k++) { rotateAnnots90(state.pageIds[i], w, h); [w, h] = [h, w]; }
-      page.setRotation(degrees((((page.getRotation().angle + dir * 90) % 360) + 360) % 360));
-    }
-  });
+  await structOp(() => rotateNow(indices, dir), { undo: () => turnStep(indices, -dir) });
 }
 
 /* ---------- delete / duplicate / blank / move ---------- */
@@ -61,14 +68,15 @@ async function insertBlankAfter(i) {
     state.cur = i + 1; state.selectedPages.clear();
   });
 }
+function moveNow(from, to) {
+  const page = state.doc.getPage(from);
+  state.doc.removePage(from);
+  state.doc.insertPage(to, page);
+  const [id] = state.pageIds.splice(from, 1); state.pageIds.splice(to, 0, id);
+  state.cur = to; state.selectedPages.clear(); state.selectedPages.add(to);
+}
 async function movePage(from, to) {
-  await structOp(async () => {
-    const page = state.doc.getPage(from);
-    state.doc.removePage(from);
-    state.doc.insertPage(to, page);
-    const [id] = state.pageIds.splice(from, 1); state.pageIds.splice(to, 0, id);
-    state.cur = to; state.selectedPages.clear(); state.selectedPages.add(to);
-  });
+  await structOp(async () => moveNow(from, to), { undo: () => ({ kind: 'move', from: to, to: from, cur: state.cur }) });
 }
 $$('.side-actions button').forEach(b => b.onclick = () => {
   if (!state.doc) return toast('Open a PDF first');
@@ -469,7 +477,12 @@ async function burnedDoc() {
     if (gone.length) { gone.forEach(c => lost.add(c)); text = [...text].filter(c => !gone.includes(c)).join(''); }
     return { font: bf.pdf, text };
   }
-  const getImage = async a => { if (!imgs[a.src]) { const b = await (await fetch(a.src)).arrayBuffer(); imgs[a.src] = a.fmt === 'jpg' ? await doc.embedJpg(b) : await doc.embedPng(b); } return imgs[a.src]; };
+  // each picture once in the file, however many marks show it
+  const getImage = async a => {
+    const im = imageOf(a), key = a.img || im.src;
+    if (!imgs[key]) { const b = await (await fetch(im.src)).arrayBuffer(); imgs[key] = im.fmt === 'jpg' ? await doc.embedJpg(b) : await doc.embedPng(b); }
+    return imgs[key];
+  };
   /* Words read off a scan go in as invisible text over the picture, which is what makes a
      scanned PDF searchable and selectable in any viewer. */
   async function addOcrLayer(page, i, toU, R) {
