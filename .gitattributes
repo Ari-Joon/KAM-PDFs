@@ -14,3 +14,13 @@
 *.traineddata binary
 *.zip binary
 *.gz binary
+
+# Windows scripts keep Windows line endings, whoever builds the release zip.
+*.bat text eol=crlf
+*.ps1 text eol=crlf
+
+# Left out of the release zip (setup/build-release.js builds it with git archive).
+/tests export-ignore
+/screenshots export-ignore
+/.gitignore export-ignore
+/.gitattributes export-ignore

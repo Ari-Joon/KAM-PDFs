@@ -1,5 +1,5 @@
 {
-  "version": "1.16.1",
-  "notes": "it checks for updates once when it opens, and not again while it stays open",
+  "version": "2.0.0",
+  "notes": "edit a PDF's own text in its own font, one long scroll of pages, locked PDFs, links and bookmarks, and phones and tablets",
   "url": "https://github.com/Ari-Joon/KAM-PDFs/releases/latest"
 }

@@ -1,0 +1,18 @@
+dict/en.js - the English word list used by the spell checker in KAM PDFs.
+
+It is built from two sources:
+
+1. The words themselves: words_alpha.txt from dwyl/english-words
+   https://github.com/dwyl/english-words
+   Released under The Unlicense (public domain).
+
+2. The order of the 20,000 most common words (used to rank spelling suggestions):
+   adapted from en_50k.txt in FrequencyWords by Hermit Dave, made from OpenSubtitles 2018
+   https://github.com/hermitdave/FrequencyWords
+   That content is licensed under Creative Commons Attribution-ShareAlike 4.0
+   (https://creativecommons.org/licenses/by-sa/4.0/).
+
+Changes made: only words present in both lists were kept for the common list, the full list
+was sorted and front-coded to make it smaller, and the result was wrapped in a script file so
+it loads without a web server. The common-word ranking in this file is shared under the same
+CC BY-SA 4.0 licence.

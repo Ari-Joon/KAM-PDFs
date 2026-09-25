@@ -1,15 +1,16 @@
 /* KAM PDFs service worker: caches the whole app so it works offline and can be installed as an app. */
-const VERSION = 'kam-pdfs-v1.16.1';
+const VERSION = 'kam-pdfs-v2.0.0';
 // dict/en.js, fonts/ and lib/ocr/* are deliberately not precached: they are large and only
 // fetched when spell checking, OCR or font matching is first used, after which the handler below
 // keeps them for offline use.
 const FILES = [
   './', 'index.html', 'scan.html', 'core.js', 'annot.js', 'ops.js', 'scan-core.js', 'scan-ui.js', 'scan-desktop.js',
   'spell.js', 'spell-ui.js', 'pdftext.js', 'pdftext-ui.js', 'ocr.js', 'ocr-ui.js', 'layers.js', 'autosave.js', 'panels.js', 'ux.js', 'palette.js', 'boot.js', 'sw-register.js', 'scan-page.js', 'viewer.js',
+  'fonts.js', 'content.js', 'textedit.js', 'crypt.js', 'links.js',
   'manifest.json', 'logo.svg', 'logo-mark.svg',
   'icons/icon-16.png', 'icons/icon-32.png', 'icons/icon-48.png', 'icons/icon-64.png',
   'icons/icon-192.png', 'icons/icon-512.png',
-  'lib/pdf.min.js', 'lib/pdf.worker.min.js', 'lib/pdf-lib.min.js', 'lib/peerjs.min.js', 'lib/qrcode.min.js',
+  'lib/pdf.min.js', 'lib/pdf.worker.min.js', 'lib/pdf-lib.min.js', 'lib/fontkit.umd.min.js', 'lib/peerjs.min.js', 'lib/qrcode.min.js',
 ];
 self.addEventListener('install', e => {
   e.waitUntil(caches.open(VERSION).then(c => c.addAll(FILES)).then(() => self.skipWaiting()));
