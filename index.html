@@ -125,6 +125,22 @@ body.resizing #sidebar,body.resizing #rightpanel{transition:none}
 .side-actions{display:grid;grid-template-columns:repeat(6,1fr);gap:3px;margin-top:6px}
 .side-actions button{padding:4px 0;font-size:13px}
 #thumbs{flex:1;overflow:auto;padding:10px;min-height:0}
+.side-switch{display:flex;gap:2px;background:var(--panel2);border:1px solid var(--border);border-radius:8px;padding:2px}
+.side-switch button{flex:1;padding:4px 6px;font-size:12px;font-weight:600;border:0;background:transparent;border-radius:6px;color:var(--muted);white-space:nowrap}
+.side-switch button.on{background:var(--btn-hover);color:var(--text)}
+.outline-actions{margin-top:6px}.outline-actions button{width:100%;font-size:12px}
+#outline{flex:1;overflow:auto;padding:6px 4px;min-height:0;font-size:13px}
+#outline .ol-empty{padding:10px 8px;font-size:12px}
+.ol-row{display:flex;align-items:center;border-radius:6px;min-height:26px}
+.ol-row:hover{background:var(--btn-hover)}
+.ol-row.here{background:var(--thumb-sel)}
+.ol-twist{flex:none;width:18px;height:22px;padding:0;border:0;background:none;color:var(--muted);font-size:10px;cursor:pointer}
+.ol-title{display:block;flex:1;min-width:0;text-align:left;justify-content:flex-start;border:0;background:none;padding:4px 2px;color:var(--text);cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font:inherit}
+.ol-title input{width:100%;font:inherit}
+.ol-del{flex:none;border:0;background:none;padding:2px 4px;opacity:0;cursor:pointer;color:var(--muted)}
+.ol-row:hover .ol-del,.ol-del:focus{opacity:.8}
+.ol-kids{padding-left:14px}
+.side-head [hidden],#sidebar [hidden]{display:none!important}
 .thumb{margin:0 auto 10px;cursor:pointer;text-align:center;border:2px solid transparent;border-radius:6px;padding:4px;position:relative;user-select:none}
 .thumb:hover{border-color:var(--border)}
 .thumb.current{border-color:var(--accent)}
@@ -450,7 +466,11 @@ details.tip>div{padding:0 2px 11px;line-height:1.55}
 </header>
 <div id="main">
   <aside id="sidebar">
-    <div class="side-head">Pages <span id="pageCountLabel" class="muted"></span>
+    <div class="side-head">
+      <div class="side-switch" role="tablist" aria-label="Show pages or bookmarks">
+        <button data-side="pages" class="on" role="tab" aria-selected="true">Pages <span id="pageCountLabel" class="muted"></span></button>
+        <button data-side="outline" role="tab" aria-selected="false">Bookmarks <span id="outlineCount" class="muted"></span></button>
+      </div>
       <div class="side-actions">
         <button data-act="rotL" title="Rotate left"><svg class="ic" aria-hidden="true"><use href="#i-rot-left"/></svg></button>
         <button data-act="rotR" title="Rotate right"><svg class="ic" aria-hidden="true"><use href="#i-rot-right"/></svg></button>
@@ -460,8 +480,10 @@ details.tip>div{padding:0 2px 11px;line-height:1.55}
         <button data-act="del" title="Delete page(s)"><svg class="ic" aria-hidden="true"><use href="#i-trash"/></svg></button>
       </div>
       <div class="muted side-tip">Drag to reorder · Ctrl+click to pick several</div>
+      <div class="outline-actions" hidden><button id="btnAddBookmark" title="Bookmark the part of the page you are looking at"><svg class="ic" aria-hidden="true"><use href="#i-plus"/></svg> Bookmark this page</button></div>
     </div>
     <div id="thumbs"></div>
+    <div id="outline" role="tree" aria-label="Bookmarks" hidden></div>
   </aside>
   <div class="splitter" id="split-sidebar" role="separator" aria-orientation="vertical"
        aria-label="Resize the pages panel" aria-valuemin="150" aria-valuemax="460" tabindex="0"></div>
@@ -685,6 +707,7 @@ details.tip>div{padding:0 2px 11px;line-height:1.55}
 <script src="fonts.js"></script>
 <script src="content.js"></script>
 <script src="textedit.js"></script>
+<script src="links.js"></script>
 <script src="lib/peerjs.min.js"></script>
 <script src="lib/qrcode.min.js"></script>
 <script src="scan-core.js"></script>

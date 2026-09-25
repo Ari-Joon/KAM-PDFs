@@ -241,6 +241,13 @@ const KamView = (() => {
     const el = els[i]; if (!el) return;
     vp.scrollTop = where === 'top' ? el.offsetTop - PAD / 2 : el.offsetTop + el.offsetHeight / 2 - vp.clientHeight / 2;
   }
+  // Put a point of a page at the top of the window (where a link or a bookmark goes).
+  function scrollToPoint(i, y) {
+    const el = els[i]; if (!el) return;
+    userScrolled = false;
+    vp.scrollTop = el.offsetTop + Math.max(0, y || 0) * state.zoom - PAD / 2;
+    schedule();
+  }
   // Bring a point of a page into view (a search match, say), centred if it is off screen.
   function reveal(i, x, y) {
     const el = els[i]; if (!el) return;
@@ -335,6 +342,7 @@ const KamView = (() => {
     ctx.clearRect(0, 0, d.ov.width, d.ov.height);
     const s = d.ov.width / sizes[i].w;
     if (typeof drawPdfTextLayer === 'function') drawPdfTextLayer(ctx, s, i);
+    if (typeof KamLinks !== 'undefined') KamLinks.drawHover(ctx, s, i);
     drawAnnots(ctx, state.pageIds[i], s, i === state.cur ? state.selected : null);
     if (i === state.cur && typeof drawActiveExtras === 'function') drawActiveExtras(ctx, s);
   }
@@ -441,7 +449,7 @@ const KamView = (() => {
   }
 
   return {
-    load, invalidate, zoomTo, goTo, setActive, scrollToPage, reveal, whenIdle, schedule,
+    load, invalidate, zoomTo, goTo, setActive, scrollToPage, scrollToPoint, reveal, whenIdle, schedule,
     drawOverlays, drawPageOverlay, scaleOf, buildThumbs, refreshThumb, pdfPage,
     size: i => sizes[i], pageEl: i => els[i], get count() { return els.length; },
     isDrawn: i => drawn.has(i) && !!drawn.get(i).zoom,

@@ -352,6 +352,8 @@ pagesEl.addEventListener('pointerdown', e => {
   const [x, y] = evtPt(e); const t = state.tool;
   const o = ov(); if (o) o.setPointerCapture(e.pointerId);
   if (t === 'select') {
+    // Ctrl+click on a link in the PDF follows it (a plain click edits, as everywhere else)
+    if ((e.ctrlKey || e.metaKey) && typeof KamLinks !== 'undefined') { const l = KamLinks.linkAt(pi, x, y); if (l) { KamLinks.follow(l); return; } }
     if (state.selected && hitHandle(state.selected, x, y)) { pushAnnotUndo(curPageId()); drag = { mode: 'resize', a: state.selected, orig: { ...state.selected } }; return; }
     const a = hitTest(x, y, null, e.altKey);
     state.selected = a; updateProps();
@@ -385,10 +387,17 @@ pagesEl.addEventListener('pointerdown', e => {
 pagesEl.addEventListener('pointermove', e => {
   if (!drag) {
     if (state.tool === 'select') {
-      if (pageOfEvent(e) !== state.cur) { pagesEl.style.cursor = ''; if (typeof pdfTextHover === 'function') pdfTextHover(0, 0, false); return; }
+      if (pageOfEvent(e) !== state.cur) {
+        pagesEl.style.cursor = ''; if (typeof pdfTextHover === 'function') pdfTextHover(0, 0, false);
+        if (typeof KamLinks !== 'undefined') KamLinks.hover(state.cur, null, null);
+        return;
+      }
       const [x, y] = evtPt(e); const onHandle = hitHandle(state.selected, x, y), hit = !onHandle && hitTest(x, y, null, e.altKey);
       let cur = onHandle ? 'nwse-resize' : hit ? 'move' : deletionAt(x, y) ? 'not-allowed' : 'default';
       if (typeof pdfTextHover === 'function' && pdfTextHover(x, y, !onHandle && !hit)) cur = 'text';
+      // a link in the PDF: say where it goes, and show the hand while Ctrl is held
+      const link = !onHandle && !hit && typeof KamLinks !== 'undefined' ? KamLinks.hover(state.cur, x, y) : null;
+      if (link) { $('#hint').textContent = link; if (e.ctrlKey || e.metaKey) cur = 'pointer'; }
       pagesEl.style.cursor = cur;
     }
     return;

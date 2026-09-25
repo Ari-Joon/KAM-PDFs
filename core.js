@@ -200,6 +200,7 @@ async function rebuild() {
   state.selected = null;
   if (typeof KamContent !== 'undefined') KamContent.reset();
   if (typeof KamPatch !== 'undefined') KamPatch.reset();
+  if (typeof KamLinks !== 'undefined') KamLinks.reset();
   await KamView.load();
   renderThumbs();
   updatePager();

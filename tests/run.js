@@ -1386,6 +1386,89 @@ test('the checksum used for PDF passwords is computed correctly', async b => {
   eq(await md5('12345678901234567890123456789012345678901234567890123456789012345678901234567890'), '57edf4a22be3c955ac49da2e2107b67a', 'MD5 of 80 digits');
 });
 
+/* ---------- links and bookmarks ---------- */
+
+// Three pages, a web link and a link to page 3 on the first, and bookmarks (one with a child).
+const linkedDoc = makeDoc(`
+  const { PDFName, PDFString, PDFHexString } = PDFLib, ctx = doc.context;
+  const pages = [1, 2, 3].map(n => { const p = doc.addPage([595, 842]); p.drawText('Page ' + n + ' heading', { x: 60, y: 780, size: 20, font: fb });
+    p.drawText('Further down page ' + n, { x: 60, y: 400, size: 12, font: f }); return p; });
+  const link = (p, rect, extra) => p.node.addAnnot(ctx.register(ctx.obj({ Type: 'Annot', Subtype: 'Link', Rect: rect, Border: [0, 0, 0], ...extra })));
+  pages[0].drawText('Visit example.com', { x: 60, y: 700, size: 12, font: f });
+  link(pages[0], [58, 696, 170, 712], { A: { S: 'URI', URI: PDFString.of('https://example.com/') } });
+  pages[0].drawText('See the appendix', { x: 60, y: 660, size: 12, font: f });
+  link(pages[0], [58, 656, 170, 672], { Dest: [pages[2].ref, 'XYZ', null, 800, null] });
+  // bookmarks: Introduction, Chapter Two (with Section 2.1), Appendix, and one with a hostile title
+  const root = ctx.obj({ Type: 'Outlines' }), rootRef = ctx.register(root);
+  const item = (title, page, top) => { const d = ctx.obj({ Title: PDFHexString.fromText(title), Dest: [pages[page].ref, 'XYZ', null, top, null] }); return [d, ctx.register(d)]; };
+  const [a, ar] = item('Introduction', 0, 842), [b2, br] = item('Chapter Two', 1, 842), [c, cr] = item('Appendix', 2, 842), [x, xr] = item('<img src=x onerror=window.__pwned=1>', 2, 842);
+  const [s, sr] = item('Section 2.1', 1, 410);
+  for (const d of [a, b2, c, x]) d.set(PDFName.of('Parent'), rootRef);
+  a.set(PDFName.of('Next'), br); b2.set(PDFName.of('Prev'), ar); b2.set(PDFName.of('Next'), cr); c.set(PDFName.of('Prev'), br); c.set(PDFName.of('Next'), xr); x.set(PDFName.of('Prev'), cr);
+  s.set(PDFName.of('Parent'), br); b2.set(PDFName.of('First'), sr); b2.set(PDFName.of('Last'), sr); b2.set(PDFName.of('Count'), ctx.obj(1));
+  root.set(PDFName.of('First'), ar); root.set(PDFName.of('Last'), xr); root.set(PDFName.of('Count'), ctx.obj(5));
+  doc.catalog.set(PDFName.of('Outlines'), rootRef);`);
+
+test('links in the PDF work with Ctrl+click, and bookmarks take you where they say', async b => {
+  await b.reload();
+  await b.evaluate(linkedDoc);
+  await b.waitFor(settled);
+  const links = await b.evaluate(`KamLinks.linksOf(0).then(l => l.map(x => [x.url, x.dest ? 'dest' : null]))`);
+  eq(links, [['https://example.com/', null], [null, 'dest']], 'both links are found');
+  await b.evaluate(`KamLinks.linksOf(0).then(() => 1)`);
+  // hovering says where a link goes; Ctrl+click follows it (a web link opens in the browser)
+  eq(await b.evaluate(`KamLinks.hover(0, 100, 842 - 704)`), 'Ctrl+click to open https://example.com/', 'hovering a link says where it goes');
+  const opened = await b.evaluate(`(() => { let got = null; const real = window.open; window.open = u => { got = u; return null; };
+    const l = KamLinks.linkAt(0, 100, 842 - 704); KamLinks.follow(l); window.open = real; return got; })()`);
+  eq(opened, 'https://example.com/', 'a web link opens its page');
+  await b.evaluate(`(() => { const ov = document.getElementById('overlay'), rc = ov.getBoundingClientRect(), z = state.zoom;
+    ov.dispatchEvent(new PointerEvent('pointerdown', { clientX: rc.left + 100 * z, clientY: rc.top + (842 - 664) * z, button: 0, ctrlKey: true, bubbles: true, pointerId: 1 })); return 1; })()`);
+  await b.waitFor(`state.cur === 2`, 5000);
+  eq(await b.evaluate(`state.cur`), 2, 'Ctrl+click on the link to the appendix goes to page 3');
+
+  // the bookmarks, as the PDF has them; their titles are shown as plain text
+  await b.evaluate(`document.querySelector('.side-switch button[data-side="outline"]').click(); 1`);
+  const titles = await b.evaluate(`[...document.querySelectorAll('#outline .ol-title')].map(t => t.textContent)`);
+  eq(titles, ['Introduction', 'Chapter Two', 'Section 2.1', 'Appendix', '<img src=x onerror=window.__pwned=1>'], 'the bookmarks are listed, children under their parent');
+  eq(await b.evaluate(`window.__pwned || 0`), 0, 'a bookmark title can never run as code');
+  await b.evaluate(`[...document.querySelectorAll('#outline .ol-title')].find(t => t.textContent === 'Introduction').click(); 1`);
+  await b.waitFor(`state.cur === 0`, 5000);
+  await b.evaluate(`[...document.querySelectorAll('#outline .ol-title')].find(t => t.textContent === 'Section 2.1').click(); 1`);
+  await b.waitFor(`state.cur === 1`, 5000);
+  const at = await b.evaluate(`(() => { const vp = document.getElementById('viewport'), el = KamView.pageEl(1); return (vp.scrollTop - el.offsetTop) / state.zoom; })()`);
+  near(at, 842 - 410, 15, 'a bookmark to part of a page brings that part to the top');
+});
+
+test('bookmarks can be added, renamed and removed, and are saved with the file', async b => {
+  await b.reload();
+  await b.evaluate(linkedDoc);
+  await b.waitFor(settled);
+  await b.evaluate(`document.querySelector('.side-switch button[data-side="outline"]').click(); 1`);
+  // add one on page 2: named after the first words in view, placed in page order
+  await b.evaluate(`KamView.goTo(1)`);
+  await b.evaluate(`KamLinks.add()`);
+  await b.waitFor(`!!document.querySelector('#outline .ol-title input')`, 5000);
+  await b.evaluate(`(() => { const i = document.querySelector('#outline .ol-title input'); i.value = 'My note on page two'; i.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); return 1; })()`);
+  await b.waitFor(`[...document.querySelectorAll('#outline .ol-title')].some(t => t.textContent === 'My note on page two')`, 10000);
+  eq(await b.evaluate(`KamLinks.readOutline().map(i => i.title)`), ['Introduction', 'Chapter Two', 'My note on page two', 'Appendix', '<img src=x onerror=window.__pwned=1>'], 'the new bookmark sits among the others in page order');
+  // remove one
+  await b.evaluate(`(() => { const row = [...document.querySelectorAll('#outline .ol-row')].find(r => r.textContent.includes('Appendix')); row.querySelector('.ol-del').click(); return 1; })()`);
+  await b.waitFor(`!KamLinks.readOutline().some(i => i.title === 'Appendix')`, 10000);
+  // saved with the file, as any viewer reads bookmarks
+  const saved = await b.evaluate(exportBase64);
+  const outline = await b.evaluate(`(async () => { const s = atob(${JSON.stringify(saved)}); const u = new Uint8Array(s.length);
+    for (let i = 0; i < s.length; i++) u[i] = s.charCodeAt(i);
+    const pdf = await pdfjsLib.getDocument({ data: u }).promise; const o = await pdf.getOutline();
+    const out = []; for (const it of o) out.push(it.title + (it.items.length ? ' > ' + it.items.map(k => k.title).join(',') : ''));
+    const mine = o.find(it => it.title === 'My note on page two'), where = await pdf.getPageIndex(mine.dest[0]);
+    return { out, where }; })()`);
+  eq(outline.out, ['Introduction', 'Chapter Two > Section 2.1', 'My note on page two', '<img src=x onerror=window.__pwned=1>'], 'the saved file has the changed bookmarks');
+  eq(outline.where, 1, 'the new bookmark points at page 2');
+  // and undo takes a change back
+  await b.evaluate(`undo()`);
+  await b.waitFor(`KamLinks.readOutline().some(i => i.title === 'Appendix')`, 10000);
+});
+
 test('shift constrains shapes and lines', async b => {
   await b.reload();
   await b.evaluate(makeDoc(`doc.addPage([420, 300]);`));
