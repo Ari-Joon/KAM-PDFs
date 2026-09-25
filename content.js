@@ -590,7 +590,10 @@ const KamContent = (() => {
       }
       sp.sort((a, b) => a - b);
       const bad = [...text].filter(ch => /[\uE000-\uF8FF\uFFFD\u0000-\u001F]/.test(ch)).length;
-      const editable = gs.every(g => g.editable) && bad <= text.length * 0.3;
+      // right-to-left scripts are stored in the order they are drawn, not read: retyping them
+      // here would scramble the words, so they are left to the older way
+      const rtl = /[\u0590-\u08FF\uFB1D-\uFDFF\uFE70-\uFEFF]/.test(text);
+      const editable = gs.every(g => g.editable) && bad <= text.length * 0.3 && !rtl;
       out.push({
         key: first.key, gkeys: ids.map(id => an.glyphs[id].key), glyphs: ids, all, text, chars,
         dir, perp, angle: Math.atan2(dir[1], dir[0]) * 180 / Math.PI, u0, u1, top, bot, v: first.v, size,

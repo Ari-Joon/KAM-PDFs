@@ -823,6 +823,25 @@ test('letters the font does not have come from a matching font, and read back co
   if (fium !== null) ok(fium.includes('ulica Żółta 12, Kraków'), `PDFium reads the new letters wrong: ${fium}`);
 });
 
+test('right-to-left lines are left to the older way, so their words are never scrambled', async b => {
+  // Hebrew and Arabic are stored in the order they are drawn, not read, so retyping them in
+  // place would jumble the words; they are covered and typed over instead
+  const pdf64 = await b.printHtml(`<!doctype html><html><head><meta charset="utf-8"><style>
+    @page { size: A5; margin: 15mm; } body { font: 14pt Arial, sans-serif; } p { margin: 0 0 14pt; }
+  </style></head><body><p>Shalom and marhaba:</p><p dir="rtl">שלום עולם</p><p dir="rtl">مرحبا بالعالم</p></body></html>`);
+  await b.reload();
+  await b.evaluate(openBase64(pdf64, 'rtl.pdf'));
+  await b.waitFor(settled);
+  const ph = await b.evaluate(`KamContent.analyse(0).then(an => an.phrases.map(p => ({ text: p.text, editable: p.editable, box: p.box })))`);
+  const latin = ph.find(p => p.text.startsWith('Shalom')), rtl = ph.filter(p => /[א-ת]|[ء-ي]|[ﹰ-ﻼ]/.test(p.text));
+  ok(latin && latin.editable, 'the English line is edited the usual way: ' + JSON.stringify(ph.map(p => p.text)));
+  ok(rtl.length >= 2 && rtl.every(p => !p.editable), 'Hebrew and Arabic lines are not retyped in place: ' + JSON.stringify(rtl.map(p => [p.text, p.editable])));
+  const r = rtl[0].box;
+  eq(await b.evaluate(`pdfTextEditAt(${r.x + r.w / 2}, ${r.y + r.h / 2})`), true, 'double-clicking one still starts editing it');
+  eq(await b.evaluate(`KamEdit.active()`), false, 'not with the in-place editor');
+  ok(await b.evaluate(`curAnnots().some(a => a.type === 'text') && curAnnots().some(a => a.type === 'rect')`), 'a cover and a text box take its place');
+});
+
 test('a line set with kerning, letter and word spacing keeps its spacing when words are added', async b => {
   await b.reload();
   await b.evaluate(makeDoc(`
