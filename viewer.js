@@ -176,6 +176,7 @@ const KamView = (() => {
     // page is drawn), so the first click on a word already knows exactly what it is.
     if (i === state.cur && typeof KamContent !== 'undefined') setTimeout(() => { if (i < state.pageIds.length) KamContent.analyse(i).catch(() => null); }, 30);
     if (i === state.cur && typeof positionTextEditor === 'function') positionTextEditor();
+    if (i === state.cur && typeof KamEdit !== 'undefined') KamEdit.position();
   }
 
   /* ---------- the page you are working on ---------- */
