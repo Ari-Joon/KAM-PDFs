@@ -163,15 +163,50 @@ const KamPanels = (() => {
     toast('Layout put back to how it started.');
   }
 
+  /* ---------- on a narrow screen, the side panels slide in over the page ----------
+     The page needs the width more than the panels do. A tap on the buttons at either end of
+     the top bar brings a panel in; a tap outside it, Esc, or choosing a page puts it away. */
+  const narrow = q => window.matchMedia(q).matches;
+  function drawer(which, open) {
+    const body = document.body, scrim = document.getElementById('scrim');
+    if (open === undefined) open = !body.classList.contains('drawer-' + which);
+    body.classList.remove('drawer-left', 'drawer-right');
+    if (open) body.classList.add('drawer-' + which);
+    if (scrim) scrim.hidden = !open;
+    const l = document.getElementById('btnSideDrawer'), r = document.getElementById('btnPanelDrawer');
+    if (l) l.setAttribute('aria-expanded', String(open && which === 'left'));
+    if (r) r.setAttribute('aria-expanded', String(open && which === 'right'));
+    if (open && which === 'left' && typeof renderThumbs === 'function' && state.doc) renderThumbs();
+  }
+  const closeDrawers = () => { if (document.body.classList.contains('drawer-left') || document.body.classList.contains('drawer-right')) drawer('left', false); };
+  function wireDrawers() {
+    const l = document.getElementById('btnSideDrawer'), r = document.getElementById('btnPanelDrawer'), scrim = document.getElementById('scrim');
+    if (l) l.onclick = () => drawer('left');
+    if (r) r.onclick = () => drawer('right');
+    if (scrim) scrim.onclick = closeDrawers;
+    document.addEventListener('keydown', e => { if (e.key === 'Escape' && document.body.matches('.drawer-left,.drawer-right')) { closeDrawers(); e.stopPropagation(); } }, true);
+    // choosing a page or a bookmark on a phone: put the list away so the page can be seen
+    document.addEventListener('click', e => {
+      if (!narrow('(max-width:700px)')) return;
+      if (e.target.closest && e.target.closest('#thumbs .thumb, #outline .ol-title')) setTimeout(closeDrawers, 120);
+    });
+    // grown past the drawers' size (a tablet turned sideways): back to ordinary panels
+    window.addEventListener('resize', () => {
+      if (document.body.classList.contains('drawer-left') && !narrow('(max-width:700px)')) closeDrawers();
+      if (document.body.classList.contains('drawer-right') && !narrow('(max-width:1024px)')) closeDrawers();
+    });
+  }
+
   function init() {
     Object.keys(BARS).forEach(wire);
     wireDock();
+    wireDrawers();
     const r = document.getElementById('btnResetLayout');
     if (r) r.onclick = reset;
     document.querySelectorAll('[data-collapse]').forEach(btn => {
       btn.onclick = () => toggle(btn.getAttribute('data-collapse'));
     });
   }
-  return { init, set, get, toggle, reset, dock, setDock, BARS };
+  return { init, set, get, toggle, reset, dock, setDock, drawer, closeDrawers, BARS };
 })();
 KamPanels.init();

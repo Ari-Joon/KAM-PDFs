@@ -103,6 +103,14 @@ async function browser() {
       // every script has run once the last ones (the command search, the viewer) are there
       await waitFor(`typeof state !== 'undefined' && typeof pdfTextEditAt === 'function' && typeof KamSpell !== 'undefined' && typeof KamPalette !== 'undefined' && typeof KamView !== 'undefined'`);
     },
+    // Pretend to be a phone or tablet (null puts the desktop back), with a touch screen.
+    emulate: async m => {
+      if (!m) { await send('Emulation.clearDeviceMetricsOverride'); await send('Emulation.setTouchEmulationEnabled', { enabled: false }); return; }
+      await send('Emulation.setDeviceMetricsOverride', { width: m.width, height: m.height, deviceScaleFactor: m.dpr || 2, mobile: true });
+      await send('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 5 });
+    },
+    // Real touches, as a finger makes them: type is touchStart, touchMove or touchEnd.
+    touch: (type, points) => send('Input.dispatchTouchEvent', { type, touchPoints: points.map(([x, y], id) => ({ x, y, id })) }),
     // Print an HTML page to PDF with Chrome itself, the way "Save as PDF" makes documents:
     // real fonts, embedded as subsets, every letter placed on its own. Returns base64.
     printHtml: async html => {
@@ -1467,6 +1475,81 @@ test('bookmarks can be added, renamed and removed, and are saved with the file',
   // and undo takes a change back
   await b.evaluate(`undo()`);
   await b.waitFor(`KamLinks.readOutline().some(i => i.title === 'Appendix')`, 10000);
+});
+
+/* ---------- phones and tablets ---------- */
+
+test('on a phone the page gets the screen, panels slide in, and fingers scroll and pinch', async b => {
+  await b.emulate({ width: 390, height: 844 });
+  try {
+    await b.reload();
+    await b.evaluate(manyPages(4));
+    await b.waitFor(settled);
+    const lay = await b.evaluate(`(() => { const r = id => document.getElementById(id).getBoundingClientRect();
+      const tools = document.getElementById('tools'), first = tools.querySelector('button').getBoundingClientRect();
+      return { viewport: r('viewport').width, side: r('sidebar').right, panel: r('rightpanel').left, toolRows: Math.round(tools.getBoundingClientRect().height / first.height),
+               saveFits: r('btnSave').right <= innerWidth, fitted: state.fit }; })()`);
+  ok(lay.viewport >= 380, `the page area should take the whole width, got ${lay.viewport}px`);
+  ok(lay.side <= 0 && lay.panel >= 390, `both side panels should be tucked away, got ${lay.side} and ${lay.panel}`);
+  eq(lay.toolRows, 1, 'the tools are one row');
+  ok(lay.saveFits, 'Save is on screen');
+
+  // the pages slide in from the left, and go away once a page is chosen
+  await b.evaluate(`document.getElementById('btnSideDrawer').click(); 1`);
+  await sleep(350);
+  ok(await b.evaluate(`document.getElementById('sidebar').getBoundingClientRect().left >= 0 && document.body.classList.contains('drawer-left')`), 'the pages list slides in');
+  await b.evaluate(`document.querySelector('#thumbs .thumb[data-i="2"]').click(); 1`);
+  await b.waitFor(`!document.body.classList.contains('drawer-left')`, 3000);
+  eq(await b.evaluate(`state.cur`), 2, 'choosing a page goes there');
+  // the document panel slides in from the right; tapping outside puts it away
+  await b.evaluate(`document.getElementById('btnPanelDrawer').click(); 1`);
+  await sleep(350);
+  ok(await b.evaluate(`document.getElementById('rightpanel').getBoundingClientRect().right <= innerWidth + 1`), 'the document panel slides in');
+  await b.evaluate(`document.getElementById('scrim').click(); 1`);
+  eq(await b.evaluate(`document.body.className.includes('drawer')`), false, 'tapping outside closes it');
+  await sleep(400);                                  // let it finish sliding away
+
+  // one finger scrolls the document (and picks nothing on the way)
+  await b.evaluate(`KamView.goTo(0)`);
+  await b.waitFor(settled);
+  const top0 = await b.evaluate(`document.getElementById('viewport').scrollTop`);
+  const box = await b.evaluate(`(() => { const r = document.getElementById('viewport').getBoundingClientRect(); return [r.left + r.width / 2, r.top + r.height / 2]; })()`);
+  await b.touch('touchStart', [[box[0], box[1] + 150]]);
+  for (let k = 1; k <= 8; k++) { await b.touch('touchMove', [[box[0], box[1] + 150 - k * 30]]); await sleep(16); }
+  await b.touch('touchEnd', []);
+  await sleep(400);
+  const top1 = await b.evaluate(`document.getElementById('viewport').scrollTop`);
+  ok(top1 > top0 + 100, `a one-finger drag should scroll the pages: ${top0} -> ${top1}`);
+  eq(await b.evaluate(`curAnnots().length`), 0, 'scrolling left nothing behind on the page');
+
+  // two fingers pinch the document, not the whole app
+  const z0 = await b.evaluate(`state.zoom`);
+  const [cx, cy] = box;
+  await b.touch('touchStart', [[cx - 40, cy], [cx + 40, cy]]);
+  for (let k = 1; k <= 8; k++) { await b.touch('touchMove', [[cx - 40 - k * 12, cy], [cx + 40 + k * 12, cy]]); await sleep(20); }
+  await b.touch('touchEnd', []);
+  await sleep(300);
+  const z1 = await b.evaluate(`state.zoom`);
+  ok(z1 > z0 * 1.8, `pinching out should zoom the document in: ${z0.toFixed(2)} -> ${z1.toFixed(2)}`);
+  await b.waitFor(settled);
+  ok(await b.evaluate(`(() => { const d = [...document.querySelectorAll('.page canvas.pdf')].find(c => c.width > 1); return !!d; })()`), 'the pages are drawn again, sharp, after the pinch');
+  eq(await b.evaluate(`Math.round(visualViewport.scale * 100)`), 100, 'the app itself did not zoom');
+  } finally { await b.emulate(null); }
+});
+
+test('on a tablet the document panel waits in a drawer, and the pages list stays', async b => {
+  await b.emulate({ width: 820, height: 1180 });
+  try {
+    await b.reload();
+    await b.evaluate(manyPages(2));
+    await b.waitFor(settled);
+    const lay = await b.evaluate(`(() => { const r = id => document.getElementById(id).getBoundingClientRect();
+      return { viewport: r('viewport').width, side: r('sidebar').width, sideLeft: r('sidebar').left, panel: r('rightpanel').left, drawerBtn: getComputedStyle(document.getElementById('btnPanelDrawer')).display }; })()`);
+    ok(lay.sideLeft >= 0 && lay.side > 100, 'the pages list is still beside the page');
+    ok(lay.panel >= 820, 'the document panel is tucked away');
+    ok(lay.viewport > 600, `the page gets most of the width, got ${lay.viewport}px`);
+    ok(lay.drawerBtn !== 'none', 'there is a button to bring the document panel in');
+  } finally { await b.emulate(null); }
 });
 
 test('shift constrains shapes and lines', async b => {

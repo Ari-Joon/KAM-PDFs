@@ -83,9 +83,15 @@ const KamEdit = (() => {
     blink = setInterval(() => { if (!S) return; S.caretOn = !S.caretOn; redraw(); }, 530);
     KamView.invalidate(pi);                    // the page underneath, redrawn without this line
     drawOverlay();
+    if (typeof touchGrab === 'function') touchGrab();
     $('#hint').textContent = 'Editing the page’s own text, in its own font. Enter or Esc when you are done.';
     return true;
   }
+  // A phone's keyboard takes the bottom of the screen when it opens: keep the line in view.
+  if (window.visualViewport) window.visualViewport.addEventListener('resize', () => {
+    if (!S) return;
+    const b = S.lay.box; KamView.reveal(S.page, b.x + b.w / 2, b.y + b.h / 2);
+  });
   // The hidden text box sits on the line, so a spelling or input-method window opens there.
   function position() {
     if (!S) return;

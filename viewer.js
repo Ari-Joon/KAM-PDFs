@@ -225,14 +225,16 @@ const KamView = (() => {
     vp.scrollLeft = el.offsetLeft + a.px * el.offsetWidth - a.ax;
     vp.scrollTop = el.offsetTop + a.py * el.offsetHeight - a.ay;
   }
-  function zoomTo(z, fit, clientX, clientY) {
+  // `live`: in the middle of a pinch, so only stretch what is drawn; it is redrawn at the end
+  function zoomTo(z, fit, clientX, clientY, live) {
     const keep = anchor(clientX, clientY);
     state.fit = fit || '';
     if (fit) fitZoom(); else state.zoom = Math.max(0.1, Math.min(8, z));
     layout();
     restore(keep);
-    for (const d of drawn.values()) d.stale = true;       // redrawn sharp at the new size; the old one stretches meanwhile
     $('#zoomLabel').textContent = Math.round(state.zoom * 100) + '%';
+    if (live) return Promise.resolve();
+    for (const d of drawn.values()) d.stale = true;       // redrawn sharp at the new size; the old one stretches meanwhile
     drawOverlay();
     schedule();
     return whenIdle();
@@ -287,6 +289,31 @@ const KamView = (() => {
     e.preventDefault();
     zoomTo(state.zoom * (e.deltaY < 0 ? 1.1 : 1 / 1.1), '', e.clientX, e.clientY);
   }, { passive: false });
+
+  /* Two fingers pinch the document, keeping the point between them still. One finger is left
+     to the browser, which scrolls. While the fingers move the pages are only stretched; they
+     are drawn sharp again once they let go. */
+  let pinch = null, pinchRaf = 0;
+  const touchMid = t => [(t[0].clientX + t[1].clientX) / 2, (t[0].clientY + t[1].clientY) / 2];
+  const touchGap = t => Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY) || 1;
+  vp.addEventListener('touchstart', e => {
+    if (e.touches.length === 2 && state.pdfjs) pinch = { gap: touchGap(e.touches), zoom: state.zoom };
+  }, { passive: true });
+  vp.addEventListener('touchmove', e => {
+    if (!pinch || e.touches.length !== 2) return;
+    e.preventDefault();
+    const z = pinch.zoom * touchGap(e.touches) / pinch.gap, [mx, my] = touchMid(e.touches);
+    if (pinchRaf) cancelAnimationFrame(pinchRaf);
+    pinchRaf = requestAnimationFrame(() => { pinchRaf = 0; zoomTo(z, '', mx, my, true); });
+  }, { passive: false });
+  const pinchEnd = e => {
+    if (!pinch || e.touches.length >= 2) return;
+    pinch = null;
+    for (const d of drawn.values()) d.stale = true;
+    schedule();
+  };
+  vp.addEventListener('touchend', pinchEnd);
+  vp.addEventListener('touchcancel', pinchEnd);
 
   // The window or a side panel changed size: a fitted page is refitted.
   let lastW = 0, lastH = 0, resizeTimer = 0;

@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, interactive-widget=resizes-content">
 <title>KAM PDFs</title>
 <link rel="icon" type="image/png" sizes="16x16" href="icons/icon-16.png?v=3">
 <link rel="icon" type="image/png" sizes="32x32" href="icons/icon-32.png?v=3">
@@ -267,6 +267,56 @@ body.no-doc #pages{display:none}
 kbd{background:var(--kbd);border:1px solid var(--border);border-radius:4px;padding:0 4px;font-size:11px}
 @media (max-width:1100px){:root{--w-rightpanel:230px;--w-sidebar:170px}}
 
+/* ================= tablets and phones =================
+   The page comes first. On a tablet the document panel slides in from the right when you want
+   it; on a phone the pages list slides in from the left too, the tools become one row of icons
+   that scrolls sideways, and the top bar keeps only what you reach for most (everything else
+   is a search away, behind the magnifier). One finger scrolls the document, two pinch it. */
+.drawer-btn{display:none}
+#scrim{position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:38;animation:fadeIn .15s ease}
+@keyframes fadeIn{from{opacity:0}to{opacity:1}}
+#viewport{touch-action:pan-x pan-y}
+#pages:not([data-cursor=""]) canvas.ov,#pages[data-grab="1"] canvas.ov{touch-action:none}
+#pages[data-cursor=""]:not([data-grab="1"]) canvas.ov{touch-action:pan-x pan-y}
+@media (max-width:1024px){
+  #btnPanelDrawer{display:inline-flex}
+  #split-rightpanel{display:none!important}
+  #rightpanel,#rightpanel.collapsed{position:fixed;top:0;right:0;bottom:0;width:min(360px,90vw)!important;min-width:0;z-index:39;
+    transform:translateX(105%);visibility:hidden;transition:transform .22s cubic-bezier(.4,0,.2,1),visibility .22s;
+    box-shadow:-10px 0 34px rgba(0,0,0,.4);border-left:1px solid var(--border);overflow:hidden}
+  body.drawer-right #rightpanel{transform:none;visibility:visible}
+  body.no-doc.show-panel #rightpanel{transform:none;visibility:visible}
+}
+@media (max-width:700px){
+  #btnSideDrawer{display:inline-flex}
+  #split-sidebar{display:none!important}
+  #sidebar,#sidebar.collapsed{position:fixed;top:0;left:0;bottom:0;width:min(300px,86vw)!important;min-width:0;z-index:39;
+    transform:translateX(-105%);visibility:hidden;transition:transform .22s cubic-bezier(.4,0,.2,1),visibility .22s;
+    box-shadow:10px 0 34px rgba(0,0,0,.4);border-right:1px solid var(--border);overflow:hidden}
+  body.drawer-left #sidebar{transform:none;visibility:visible}
+  .thumb canvas{width:120px}
+  .side-tip{display:none}
+  #topbar{gap:6px;padding:6px 8px;min-height:50px}
+  .brand{font-size:0;gap:0;margin-right:0}.brand img{width:28px;height:28px}
+  #btnFind,#btnScan,#btnTheme,#btnInstall,#btnUpdates:not(.available){display:none}
+  #btnSave{font-size:0;gap:0;padding:7px 11px}
+  #topbar .ic,#tools .ic{width:18px;height:18px}
+  #topbar button,#tools button{min-height:38px}
+  #toolbar{padding:6px 8px}
+  #toolbarGrip{display:none}
+  #tools{flex-wrap:nowrap;overflow-x:auto;overscroll-behavior-x:contain;scrollbar-width:none;margin:0 -8px;padding:0 8px}
+  #tools::-webkit-scrollbar{display:none}
+  #tools button{font-size:0;gap:0;padding:8px 11px;flex:none}
+  #tools .ic-caret,.tsep{display:none}
+  #tools .menu{position:fixed;top:auto;left:8px;right:8px;min-width:0}
+  #props{gap:6px 10px}
+  .status-hint{display:none}
+  #pager{display:flex;justify-content:space-between;gap:8px;padding:4px 8px}
+  .fit-label{display:none}
+  #pages{padding:10px 8px;gap:10px}
+  #findBar{left:8px;right:8px}#findBar input{flex:1;width:auto;min-width:0}
+}
+
 /* ================= calm by default ================= */
 /* With no document open there is nothing to select, draw on or zoom, so none of it is shown. */
 body.no-doc #sidebar,body.no-doc #split-sidebar,body.no-doc #toolbar,body.no-doc #pager,
@@ -432,9 +482,12 @@ details.tip>div{padding:0 2px 11px;line-height:1.55}
 <symbol id="i-stamp" viewBox="0 0 24 24"><path d="M9.5 3.5h5l-1 7h-3z"/><path d="M4.5 14.5a2 2 0 0 1 2-2h11a2 2 0 0 1 2 2V17h-15z"/><path d="M5 20.5h14"/></symbol>
 <symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 11v5.5M12 7.8h.01"/></symbol>
 <symbol id="i-settings" viewBox="0 0 24 24"><path d="M4 6h9M17 6h3M4 12h3M11 12h9M4 18h11M19 18h1"/><circle cx="15" cy="6" r="2"/><circle cx="9" cy="12" r="2"/><circle cx="17" cy="18" r="2"/></symbol>
+<symbol id="i-pages" viewBox="0 0 24 24"><rect x="4" y="3" width="11" height="14" rx="1.5"/><path d="M8.5 21H18a2 2 0 0 0 2-2V7.5"/></symbol>
+<symbol id="i-panel" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M15 4v16M17.5 8.5h1M17.5 11.5h1"/></symbol>
 <symbol id="i-bulb" viewBox="0 0 24 24"><path d="M9 18h6M10 21h4"/><path d="M12 3a6 6 0 0 0-3.5 10.9c.6.5 1 1.2 1 2V16h5v-.1c0-.8.4-1.5 1-2A6 6 0 0 0 12 3z"/></symbol>
 </defs></svg>
 <header id="topbar">
+  <button id="btnSideDrawer" class="icon-btn drawer-btn doc-only" title="Pages and bookmarks" aria-label="Show the pages and bookmarks" aria-controls="sidebar" aria-expanded="false"><svg class="ic" aria-hidden="true"><use href="#i-pages"/></svg></button>
   <div class="brand"><img src="logo-mark.svg" alt="KAM logo"> KAM <span>PDFs</span></div>
   <div class="menu-wrap">
     <button id="btnFile" class="menu-btn" aria-haspopup="menu" aria-expanded="false" aria-controls="fileMenu" title="Open, combine, save a copy, print">File <svg class="ic ic-caret" aria-hidden="true"><use href="#i-caret"/></svg></button>
@@ -461,6 +514,7 @@ details.tip>div{padding:0 2px 11px;line-height:1.55}
     <button id="btnUpdates" title="Check for updates" aria-label="Check for updates"><svg class="ic ic-check" aria-hidden="true"><use href="#i-update"/></svg><svg class="ic ic-get" aria-hidden="true"><use href="#i-download"/></svg><span class="upd-label"></span></button>
     <button id="btnTheme" class="icon-btn" title="Switch light / dark mode" aria-label="Switch light or dark mode"><svg class="ic" aria-hidden="true"><use href="#i-sun"/></svg><svg class="ic" aria-hidden="true"><use href="#i-moon"/></svg></button>
     <button id="btnInstall" hidden title="Install KAM PDFs as an app with its own window and icon"><svg class="ic" aria-hidden="true"><use href="#i-app"/></svg> Install app</button>
+    <button id="btnPanelDrawer" class="icon-btn drawer-btn doc-only" title="Save, stamp, layers, form and more" aria-label="Show the document panel" aria-controls="rightpanel" aria-expanded="false"><svg class="ic" aria-hidden="true"><use href="#i-panel"/></svg></button>
     <button id="btnSave" class="primary doc-only" title="Save the PDF (Ctrl+S)"><svg class="ic" aria-hidden="true"><use href="#i-download"/></svg> Save PDF</button>
   </div>
 </header>
@@ -699,6 +753,7 @@ details.tip>div{padding:0 2px 11px;line-height:1.55}
     <div class="palette-foot muted">Arrow keys to move · Enter to run · Esc to close</div>
   </div>
 </div>
+<div id="scrim" hidden></div>
 <script src="crypt.js"></script>
 <script src="core.js"></script>
 <script src="annot.js"></script>

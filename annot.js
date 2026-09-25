@@ -290,7 +290,11 @@ function updateProps() {
   $$('#props label').forEach(l => l.classList.toggle('on', vis.includes(l.dataset.p)));
   $('#btnDelAnnot').style.display = a ? '' : 'none';
   $('#hint').textContent = a ? '' : (hints[state.tool] || '');
+  touchGrab();
 }
+// On a touch screen one finger scrolls the page, except when something is selected (it moves
+// that instead) or a line of text is being edited (it moves the caret).
+function touchGrab() { pagesEl.dataset.grab = state.selected || (typeof KamEdit !== 'undefined' && KamEdit.active()) ? '1' : ''; }
 function onPropChange() {
   const a = state.selected;
   const color = $('#pColor').value, fillOn = $('#pFillOn').checked, fill = $('#pFill').value;
@@ -439,6 +443,8 @@ pagesEl.addEventListener('pointermove', e => {
 function endDrag(e) {
   if (!drag) return;
   if (drag.mode === 'phrase') { drag = null; KamEdit.pointerUp(); return; }
+  // a finger that started scrolling the page: the browser took it over, so it was not a tap
+  if (e && e.type === 'pointercancel' && drag.mode === 'seltext') { drag = null; return; }
   if (drag.mode === 'seltext') {
     const moved = drag.moved, start = drag.start; drag = null;
     if (moved) pdfTextDragEnd();
@@ -461,6 +467,8 @@ function endDrag(e) {
 }
 pagesEl.addEventListener('pointerup', endDrag);
 pagesEl.addEventListener('pointercancel', endDrag);
+// a long press on a touch screen would offer to save the page picture: not what anyone meant
+pagesEl.addEventListener('contextmenu', e => { if (window.matchMedia('(pointer: coarse)').matches) e.preventDefault(); });
 /* Double-click should always give you somewhere to type. In order: a text box of yours, then
    the PDF's own text, then a fresh text box. Without the last step a whiteout swallowed the
    double-click and there was no way to write in the space you had just cleared. */
