@@ -5,7 +5,7 @@ const VERSION = 'kam-pdfs-v1.16.1';
 // keeps them for offline use.
 const FILES = [
   './', 'index.html', 'scan.html', 'core.js', 'annot.js', 'ops.js', 'scan-core.js', 'scan-ui.js', 'scan-desktop.js',
-  'spell.js', 'spell-ui.js', 'pdftext.js', 'pdftext-ui.js', 'ocr.js', 'ocr-ui.js', 'layers.js', 'autosave.js', 'panels.js', 'ux.js', 'palette.js', 'boot.js', 'sw-register.js', 'scan-page.js',
+  'spell.js', 'spell-ui.js', 'pdftext.js', 'pdftext-ui.js', 'ocr.js', 'ocr-ui.js', 'layers.js', 'autosave.js', 'panels.js', 'ux.js', 'palette.js', 'boot.js', 'sw-register.js', 'scan-page.js', 'viewer.js',
   'manifest.json', 'logo.svg', 'logo-mark.svg',
   'icons/icon-16.png', 'icons/icon-32.png', 'icons/icon-48.png', 'icons/icon-64.png',
   'icons/icon-192.png', 'icons/icon-512.png',

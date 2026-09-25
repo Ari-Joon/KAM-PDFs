@@ -6,7 +6,10 @@
   ellipse, image) have x,y = local top-left, w,h, and rot (clockwise degrees).
   Path annotations (pen, line, arrow) have pts.
 */
-const overlay = $('#overlay');
+// The overlay of the page you are working on. It moves with you from page to page (viewer.js
+// hands the id over), so this is looked up each time rather than kept.
+const ov = () => document.getElementById('overlay');
+const pagesEl = $('#pages');
 const measureCtx = document.createElement('canvas').getContext('2d');
 const imgCache = new Map();
 
@@ -146,14 +149,14 @@ function bounds(a) {
   const x = Math.min(...xs), y = Math.min(...ys);
   return { x, y, w: Math.max(...xs) - x, h: Math.max(...ys) - y };
 }
+// Redraw the marks on every page that is drawn at the moment (viewer.js keeps only the pages
+// near the window), then bring the Layers list up to date.
 function drawOverlay() {
-  const ctx = overlay.getContext('2d');
-  ctx.clearRect(0, 0, overlay.width, overlay.height);
-  if (!state.pageIds.length) return;
-  const s = state.zoom * (window.devicePixelRatio || 1);
-  if (typeof drawPdfTextLayer === 'function') drawPdfTextLayer(ctx, s);
-  drawAnnots(ctx, curPageId(), s, state.selected);
+  if (state.pageIds.length && typeof KamView !== 'undefined') KamView.drawOverlays();
   if (typeof refreshLayers === 'function') refreshLayers();
+}
+// What only the page you are working on shows: the box being dragged out for new text.
+function drawActiveExtras(ctx, s) {
   if (drag && drag.mode === 'textbox') {
     const dpr = window.devicePixelRatio || 1, [sx, sy] = drag.start, [cx, cy] = drag.cur;
     ctx.save(); ctx.strokeStyle = '#f5b400'; ctx.lineWidth = dpr; ctx.setLineDash([4 * dpr, 3 * dpr]);
@@ -238,7 +241,7 @@ function setTool(t) {
   commitTextEdit();
   state.tool = t; state.selected = null;
   $$('#tools button[data-tool]').forEach(b => b.classList.toggle('active', b.dataset.tool === t));
-  overlay.style.cursor = ''; overlay.className = t === 'select' ? '' : t === 'text' ? 'cur-text' : 'cur-cross';
+  pagesEl.style.cursor = ''; pagesEl.dataset.cursor = t === 'select' ? '' : t === 'text' ? 'text' : 'cross';
   updateProps(); drawOverlay();
   document.dispatchEvent(new CustomEvent('kam:tool', { detail: t }));
 }
@@ -301,7 +304,9 @@ function deleteSelected() {
 
 /* ---------- pointer handling ---------- */
 let drag = null;
-function evtPt(e) { const r = overlay.getBoundingClientRect(); return [(e.clientX - r.left) / state.zoom, (e.clientY - r.top) / state.zoom]; }
+function evtPt(e) { const r = ov().getBoundingClientRect(); return [(e.clientX - r.left) / state.zoom, (e.clientY - r.top) / state.zoom]; }
+// Which page an event happened on, from the page element it is inside.
+function pageOfEvent(e) { const el = e.target && e.target.closest ? e.target.closest('.page') : null; return el ? +el.dataset.i : -1; }
 function newBox(type, x, y) {
   const base = { id: uid(), type, x, y, w: 0, h: 0, rot: 0, opacity: defaults.opacity };
   if (type === 'highlight') return Object.assign(base, { type: 'rect', fill: defaults.fill, stroke: null, width: 0, opacity: parseFloat($('#pOpacity').value) || 0.45, blend: 'multiply' });
@@ -309,12 +314,14 @@ function newBox(type, x, y) {
   if (type === 'redact') return Object.assign(base, { type: 'rect', fill: '#000000', stroke: null, width: 0, opacity: 1, redact: true });
   return Object.assign(base, { stroke: defaults.color, fill: defaults.fillOn ? defaults.fill : null, width: defaults.width });
 }
-overlay.addEventListener('pointerdown', e => {
-  if (!state.pageIds.length || e.button !== 0) return;
+pagesEl.addEventListener('pointerdown', e => {
+  if (!state.pageIds.length || e.button !== 0 || e.target === ed) return;
+  const pi = pageOfEvent(e); if (pi < 0) return;
   e.preventDefault(); // keep focus from jumping away from the text editor
   if (editing) { commitTextEdit(); if (state.tool === 'text') return; }
+  if (pi !== state.cur) KamView.setActive(pi);       // clicking a page makes it the one you work on
   const [x, y] = evtPt(e); const t = state.tool;
-  overlay.setPointerCapture(e.pointerId);
+  const o = ov(); if (o) o.setPointerCapture(e.pointerId);
   if (t === 'select') {
     if (state.selected && hitHandle(state.selected, x, y)) { pushAnnotUndo(curPageId()); drag = { mode: 'resize', a: state.selected, orig: { ...state.selected } }; return; }
     const a = hitTest(x, y, null, e.altKey);
@@ -346,13 +353,14 @@ overlay.addEventListener('pointerdown', e => {
   }
   const a = newBox(t, x, y); curAnnots().push(a); drag = { mode: 'shape', a, start: [x, y] };
 });
-overlay.addEventListener('pointermove', e => {
+pagesEl.addEventListener('pointermove', e => {
   if (!drag) {
     if (state.tool === 'select') {
+      if (pageOfEvent(e) !== state.cur) { pagesEl.style.cursor = ''; if (typeof pdfTextHover === 'function') pdfTextHover(0, 0, false); return; }
       const [x, y] = evtPt(e); const onHandle = hitHandle(state.selected, x, y), hit = !onHandle && hitTest(x, y, null, e.altKey);
       let cur = onHandle ? 'nwse-resize' : hit ? 'move' : deletionAt(x, y) ? 'not-allowed' : 'default';
       if (typeof pdfTextHover === 'function' && pdfTextHover(x, y, !onHandle && !hit)) cur = 'text';
-      overlay.style.cursor = cur;
+      pagesEl.style.cursor = cur;
     }
     return;
   }
@@ -411,13 +419,13 @@ function endDrag(e) {
   }
   drag = null; drawOverlay(); refreshThumb(state.cur);
 }
-overlay.addEventListener('pointerup', endDrag);
-overlay.addEventListener('pointercancel', endDrag);
+pagesEl.addEventListener('pointerup', endDrag);
+pagesEl.addEventListener('pointercancel', endDrag);
 /* Double-click should always give you somewhere to type. In order: a text box of yours, then
    the PDF's own text, then a fresh text box. Without the last step a whiteout swallowed the
    double-click and there was no way to write in the space you had just cleared. */
-overlay.addEventListener('dblclick', async e => {
-  if (state.tool !== 'select') return;
+pagesEl.addEventListener('dblclick', async e => {
+  if (state.tool !== 'select' || e.target === ed || pageOfEvent(e) !== state.cur) return;
   const [x, y] = evtPt(e);
   const mine = hitTest(x, y, 'text');
   if (mine) { startTextEdit(mine); return; }
@@ -596,8 +604,16 @@ document.addEventListener('keydown', e => {
     return;
   }
   if (e.key.startsWith('Arrow') && state.selected) { e.preventDefault(); nudge(e.key, e.shiftKey ? 10 : 1); return; }
-  if (e.key === 'ArrowLeft' || e.key === 'PageUp') { goTo(state.cur - 1); return; }
-  if (e.key === 'ArrowRight' || e.key === 'PageDown') { goTo(state.cur + 1); return; }
+  if (e.key === 'ArrowLeft' || e.key === 'PageUp') { e.preventDefault(); goTo(state.cur - 1); return; }
+  if (e.key === 'ArrowRight' || e.key === 'PageDown') { e.preventDefault(); goTo(state.cur + 1); return; }
+  if (e.key === 'Home' || e.key === 'End') { e.preventDefault(); goTo(e.key === 'Home' ? 0 : state.pageIds.length - 1); return; }
+  // the page column scrolls with the keyboard too, as a reader would expect
+  if (!mod && (e.key === 'ArrowDown' || e.key === 'ArrowUp' || e.key === ' ')) {
+    const vp = $('#viewport'); e.preventDefault();
+    const d = e.key === ' ' ? vp.clientHeight * 0.85 * (e.shiftKey ? -1 : 1) : (e.key === 'ArrowDown' ? 60 : -60);
+    vp.scrollBy({ top: d, behavior: e.key === ' ' ? 'smooth' : 'auto' });
+    return;
+  }
   const map = { v: 'select', t: 'text', p: 'pen', h: 'highlight', r: 'rect', e: 'ellipse', l: 'line', a: 'arrow', w: 'whiteout', x: 'redact' };
   if (!mod && !e.altKey && map[k]) setTool(map[k]);
 });

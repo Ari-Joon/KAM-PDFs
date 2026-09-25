@@ -100,7 +100,8 @@ async function browser() {
     reload: async () => {
       errors.length = 0;
       await send('Page.navigate', { url: `http://localhost:${PORT}/index.html?t=${Date.now()}` });
-      await waitFor(`typeof state !== 'undefined' && typeof pdfTextEditAt === 'function' && typeof KamSpell !== 'undefined'`);
+      // every script has run once the last ones (the command search, the viewer) are there
+      await waitFor(`typeof state !== 'undefined' && typeof pdfTextEditAt === 'function' && typeof KamSpell !== 'undefined' && typeof KamPalette !== 'undefined' && typeof KamView !== 'undefined'`);
     },
     close: () => { try { ws.close(); } catch (e) { } proc.kill(); },
   };
@@ -1243,6 +1244,95 @@ test('a first tip appears once, and then stays gone', async b => {
   await b.evaluate(makeDoc(`doc.addPage([420, 300]);`));
   await b.waitFor(settled);
   eq(await b.evaluate(`document.getElementById('coach').hidden`), true, 'and it does not come back');
+});
+
+/* ---------- 2.0: every page in one scrolling column ---------- */
+const manyPages = (n, w = 595, h = 842) => makeDoc(`
+  for (let p = 0; p < ${n}; p++) { const pg = doc.addPage([${w}, ${h}]);
+    pg.drawText('Page ' + (p + 1), { x: 50, y: ${h} - 70, size: 28, font: fb });
+    for (let l = 0; l < 20; l++) pg.drawText('Line ' + l + ' of page ' + (p + 1), { x: 50, y: ${h} - 120 - l * 22, size: 12, font: f }); }`);
+const drawnPages = `[...document.querySelectorAll('.page canvas.pdf')].map(c => +c.parentNode.dataset.i).sort((a, b) => a - b)`;
+// scroll the way a reader does: a wheel movement, then the column moves
+const scrollToPageTop = i => `(async () => { const vp = document.getElementById('viewport');
+  vp.dispatchEvent(new WheelEvent('wheel', { deltaY: 10, bubbles: true }));
+  vp.scrollTop = KamView.pageEl(${i}).offsetTop - 10;
+  await new Promise(r => setTimeout(r, 250)); await KamView.whenIdle(); return state.cur; })()`;
+
+test('pages scroll in one column, and only the ones near the window are drawn', async b => {
+  await b.reload();
+  await b.evaluate(manyPages(60));
+  await b.waitFor(settled);
+  await b.evaluate(`setZoom(1, 'width')`); await b.waitFor(settled);
+  eq(await b.evaluate(`document.querySelectorAll('#pages .page').length`), 60, 'every page has its place in the column');
+  const first = await b.evaluate(drawnPages);
+  ok(first.length >= 1 && first.length <= 6 && first[0] === 0, 'only the first few pages are drawn at the start: ' + first);
+
+  eq(await b.evaluate(scrollToPageTop(30)), 30, 'scrolling to page 31 makes it the current page');
+  eq(await b.evaluate(`document.getElementById('pageNum').value`), '31', 'the page number follows the scrolling');
+  const mid = await b.evaluate(drawnPages);
+  ok(mid.includes(30) && !mid.includes(0), `pages near the window are drawn, far ones let go: ${mid}`);
+  ok(mid.length <= 10, `memory stays flat: ${mid.length} pages drawn`);
+  eq(await b.evaluate(`document.getElementById('overlay').parentNode.dataset.i`), '30', 'the overlay you draw on moved with you');
+  const thumbs = await b.evaluate(`document.querySelectorAll('.thumb canvas[data-drawn="1"]').length`);
+  ok(thumbs < 30, `thumbnails are drawn as they come into view, not all at once (${thumbs} of 60)`);
+});
+
+test('clicking a page makes it the one you work on', async b => {
+  await b.reload();
+  await b.evaluate(manyPages(3));
+  await b.waitFor(settled);
+  await b.evaluate(`setZoom(0.5)`); await b.waitFor(settled);
+  eq(await b.evaluate(`state.cur`), 0, 'the first page to begin with');
+  // press on the second page, as a mouse would
+  await b.evaluate(`(() => { const o = document.querySelector('.page[data-i="1"] canvas.ov'), r = o.getBoundingClientRect();
+    o.setPointerCapture = () => {};
+    o.dispatchEvent(new PointerEvent('pointerdown', { clientX: r.left + 20, clientY: r.top + 20, button: 0, bubbles: true, pointerId: 1 }));
+    o.dispatchEvent(new PointerEvent('pointerup', { clientX: r.left + 20, clientY: r.top + 20, button: 0, bubbles: true, pointerId: 1 })); return 1; })()`);
+  eq(await b.evaluate(`state.cur`), 1, 'the page you clicked is now the current page');
+  await b.evaluate(`setTool('rect')`);
+  await b.evaluate(dragOn(40, 40, 200, 140));
+  eq(await b.evaluate(`[0, 1, 2].map(i => (state.annots[state.pageIds[i]] || []).length)`), [0, 1, 0], 'a rectangle drawn there lands on that page');
+});
+
+test('zooming keeps the point under the cursor still, and never shows a blank page', async b => {
+  await b.reload();
+  await b.evaluate(manyPages(3));
+  await b.waitFor(settled);
+  // wide enough to scroll sideways, so the point can be held still in both directions
+  await b.evaluate(`setZoom(2)`); await b.waitFor(settled);
+  await b.evaluate(`(() => { const vp = document.getElementById('viewport'); vp.scrollLeft = 200; vp.scrollTop = 150; return 1; })()`);
+  // a point on the page, and the screen position it is at
+  const r = JSON.parse(await b.evaluate(`(() => { const v = document.getElementById('viewport').getBoundingClientRect();
+    return JSON.stringify({ x: v.left + v.width * 0.6, y: v.top + v.height * 0.5 }); })()`));
+  const under = `(() => { const o = document.getElementById('overlay').getBoundingClientRect();
+    return [(${r.x} - o.left) / state.zoom, (${r.y} - o.top) / state.zoom]; })()`;
+  const before = await b.evaluate(under);
+  // zoom in with Ctrl and the mouse wheel over that spot, then look at the page at once,
+  // before the sharper picture has had time to arrive
+  const inkNow = await b.evaluate(`(() => { const vp = document.getElementById('viewport');
+    for (let k = 0; k < 4; k++) vp.dispatchEvent(new WheelEvent('wheel', { deltaY: -100, ctrlKey: true, clientX: ${r.x}, clientY: ${r.y}, bubbles: true, cancelable: true }));
+    const c = document.getElementById('pageCanvas'), d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data;
+    let ink = 0; for (let i = 0; i < d.length; i += 16) if (d[i] < 128) ink++;
+    return ink; })()`);
+  ok(inkNow > 50, 'the page is still showing while it is redrawn at the new size');
+  await b.waitFor(settled);
+  const after = await b.evaluate(under);
+  ok(await b.evaluate(`state.zoom`) > 2.6, 'it zoomed in');
+  near(after[0], before[0], 1.5, 'the same point stays under the cursor (across)');
+  near(after[1], before[1], 1.5, 'the same point stays under the cursor (down)');
+});
+
+test('a very large page still draws at high zoom', async b => {
+  await b.reload();
+  await b.evaluate(manyPages(1, 2384, 3370));          // A0: plans and posters
+  await b.waitFor(settled);
+  await b.evaluate(`setZoom(8)`); await b.waitFor(settled);
+  const r = JSON.parse(await b.evaluate(`(() => { const c = document.getElementById('pageCanvas'), g = c.getContext('2d');
+    const d = g.getImageData(0, 0, Math.min(c.width, 1200), Math.min(c.height, 600)).data;
+    let ink = 0; for (let i = 0; i < d.length; i += 4) if (d[i] < 128) ink++;
+    return JSON.stringify({ px: c.width * c.height, ink }); })()`));
+  ok(r.px <= 16777216 * 1.01, `the page is drawn into a bitmap of a sensible size (${Math.round(r.px / 1e6)} megapixels)`);
+  ok(r.ink > 100, 'and it is not blank');
 });
 
 /* ---------- 2.0: work is never thrown away, and nothing in a PDF can run ---------- */

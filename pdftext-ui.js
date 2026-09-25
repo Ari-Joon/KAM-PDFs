@@ -255,7 +255,9 @@
   }
   async function showMatch() {
     const m = find.matches[find.cur]; if (!m) return;
-    if (m.page !== state.cur) await goTo(m.page);
+    if (m.page !== state.cur) KamView.setActive(m.page);
+    // bring the word itself into view, not just the top of its page
+    KamView.reveal(m.page, m.run.x + KamPdfText.uAt(m.run, m.start) - m.run.u0, m.run.y + m.run.h / 2);
     updateCount(); drawOverlay();
   }
   function step(d) { if (!find.matches.length) return; find.cur = (find.cur + d + find.matches.length) % find.matches.length; showMatch(); }
@@ -288,12 +290,14 @@
   document.addEventListener('keydown', e => { if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'f') { e.preventDefault(); openFind(); } });
 
   /* ---------- overlay: hover box, picked box, search matches ---------- */
-  window.drawPdfTextLayer = (ctx, s) => {
+  // Drawn onto every page that is on screen: search matches on all of them; the hover box,
+  // the picked line and a text selection only on the page you are working on.
+  window.drawPdfTextLayer = (ctx, s, pi = state.cur) => {
     const dpr = window.devicePixelRatio || 1;
     if (find.docRef && find.docRef !== state.pdfjs) { find.matches = []; find.cur = -1; find.docRef = state.pdfjs; if (find.open) updateCount(); }
     if (find.open && find.matches.length) {
       find.matches.forEach((m, i) => {
-        if (m.page !== state.cur) return;
+        if (m.page !== pi) return;
         const r = m.run, ua = KamPdfText.uAt(r, m.start) - r.u0, ub = KamPdfText.uAt(r, m.end) - r.u0;
         ctx.save(); ctx.translate(r.x * s, r.y * s); ctx.rotate(r.rot * Math.PI / 180);
         ctx.fillStyle = i === find.cur ? 'rgba(245,180,0,.55)' : 'rgba(245,180,0,.28)';
@@ -309,6 +313,7 @@
       ctx.strokeRect(-2 * s, -2 * s, (r.w + 4) * s, (r.h + 4) * s);
       ctx.restore();
     };
+    if (pi !== state.cur) return;
     const o = ordered();
     if (o && sel.page === state.cur) {
       const runs = KamPdfText.runsOf(sel.page), [a, b] = o;

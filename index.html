@@ -163,14 +163,17 @@ body.resizing #sidebar,body.resizing #rightpanel{transition:none}
 #props input[type=range]{width:80px}
 #hint{flex:1;min-width:0}
 
-#viewport{flex:1;min-height:0;overflow:auto;background:var(--viewport);position:relative;display:flex;align-items:flex-start;justify-content:center;justify-content:safe center;scrollbar-gutter:stable}
-#pageWrap{position:relative;flex:0 0 auto;margin:20px;box-shadow:var(--shadow);background:#fff;width:0;height:0}
-#pageCanvas,#overlay{position:absolute;left:0;top:0}
-#overlay{touch-action:none}
+#viewport{flex:1;min-height:0;overflow:auto;background:var(--viewport);position:relative;scrollbar-gutter:stable;overflow-anchor:none}
+/* every page in one column; viewer.js sizes each one and draws only those near the window */
+#pages{display:flex;flex-direction:column;align-items:center;gap:14px;padding:20px;min-width:max-content;box-sizing:border-box}
+.page{position:relative;flex:none;background:#fff;box-shadow:var(--shadow)}
+.page canvas{position:absolute;left:0;top:0;width:100%;height:100%;display:block}
+.page canvas.ov{touch-action:none}
+body.no-doc #pages{display:none}
 /* High-contrast cursors (black with white outline) so they stay visible on any page */
-#overlay.cur-text{cursor:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='24' height='24'><g fill='none' stroke='white' stroke-width='4.5' stroke-linecap='round'><path d='M8 3h8M12 3v18M8 21h8'/></g><g fill='none' stroke='black' stroke-width='2' stroke-linecap='round'><path d='M8 3h8M12 3v18M8 21h8'/></g></svg>") 12 12, text}
-#overlay.cur-cross{cursor:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='24' height='24'><g stroke='white' stroke-width='4.5' stroke-linecap='round'><path d='M12 2v20M2 12h20'/></g><g stroke='black' stroke-width='2' stroke-linecap='round'><path d='M12 2v20M2 12h20'/></g><circle cx='12' cy='12' r='2.5' fill='%23f5b400'/></svg>") 12 12, crosshair}
-#textEditor{position:absolute;display:none;background:rgba(255,255,255,.85);border:1px dashed var(--accent);padding:0;margin:0;resize:none;overflow:hidden;color:#000;outline:none;line-height:1.2;min-width:30px;white-space:pre;overflow-wrap:break-word;word-break:break-word;border-radius:0;transform-origin:0 0;caret-color:#1d4ed8;box-shadow:0 0 0 1px rgba(255,255,255,.9),0 0 0 2px rgba(245,180,0,.6)}
+#pages[data-cursor="text"] canvas.ov{cursor:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='24' height='24'><g fill='none' stroke='white' stroke-width='4.5' stroke-linecap='round'><path d='M8 3h8M12 3v18M8 21h8'/></g><g fill='none' stroke='black' stroke-width='2' stroke-linecap='round'><path d='M8 3h8M12 3v18M8 21h8'/></g></svg>") 12 12, text}
+#pages[data-cursor="cross"] canvas.ov{cursor:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='24' height='24'><g stroke='white' stroke-width='4.5' stroke-linecap='round'><path d='M12 2v20M2 12h20'/></g><g stroke='black' stroke-width='2' stroke-linecap='round'><path d='M12 2v20M2 12h20'/></g><circle cx='12' cy='12' r='2.5' fill='%23f5b400'/></svg>") 12 12, crosshair}
+#textEditor{position:absolute;z-index:3;display:none;background:rgba(255,255,255,.85);border:1px dashed var(--accent);padding:0;margin:0;resize:none;overflow:hidden;color:#000;outline:none;line-height:1.2;min-width:30px;white-space:pre;overflow-wrap:break-word;word-break:break-word;border-radius:0;transform-origin:0 0;caret-color:#1d4ed8;box-shadow:0 0 0 1px rgba(255,255,255,.9),0 0 0 2px rgba(245,180,0,.6)}
 #pager{container-type:inline-size;display:grid;grid-template-columns:minmax(0,1fr) auto minmax(max-content,1fr);align-items:center;gap:12px;padding:5px 10px;background:var(--panel);border-top:1px solid var(--border);flex:none;order:5}
 #pager input{width:54px;text-align:center}
 #pageTotal{color:var(--muted)}
@@ -508,11 +511,8 @@ details.tip>div{padding:0 2px 11px;line-height:1.55}
       <button id="btnUpdateLater" title="Hide this until the next version">Not now</button>
     </div>
     <div id="viewport">
-      <div id="pageWrap">
-        <canvas id="pageCanvas"></canvas>
-        <canvas id="overlay"></canvas>
-        <textarea id="textEditor" rows="1" spellcheck="true" autocorrect="off" autocapitalize="sentences"></textarea>
-      </div>
+      <div id="pages" aria-label="Pages"></div>
+      <textarea id="textEditor" rows="1" spellcheck="true" autocorrect="off" autocapitalize="sentences"></textarea>
       <div id="empty">
         <img src="logo.svg" alt="KAM logo" class="welcome-logo">
         <div class="welcome-title">KAM <span>PDFs</span></div>
@@ -677,6 +677,7 @@ details.tip>div{padding:0 2px 11px;line-height:1.55}
 <script src="core.js"></script>
 <script src="annot.js"></script>
 <script src="ops.js"></script>
+<script src="viewer.js"></script>
 <script src="lib/peerjs.min.js"></script>
 <script src="lib/qrcode.min.js"></script>
 <script src="scan-core.js"></script>

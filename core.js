@@ -158,119 +158,24 @@ async function rebuild() {
   state.pdfjs = await pdfjsLib.getDocument({ data: bytes.slice() }).promise;
   if (state.cur >= state.pageIds.length) state.cur = Math.max(0, state.pageIds.length - 1);
   state.selected = null;
-  await renderPage();
+  if (typeof KamPatch !== 'undefined') KamPatch.reset();
+  await KamView.load();
   renderThumbs();
   updatePager();
   if (typeof noteChange === 'function') noteChange();
 }
 
-/* ---------- main page rendering ---------- */
-async function renderPage() {
-  const pdf = state.pdfjs;
-  // A page change can replace the document while this is still drawing the old one; the old
-  // copy is then gone, and whatever it throws is no longer of interest to anyone.
-  try { await renderPageOf(pdf); } catch (e) { if (pdf === state.pdfjs) console.error(e); }
-}
-async function renderPageOf(pdf) {
-  const canvas = $('#pageCanvas'), overlay = $('#overlay'), wrap = $('#pageWrap');
-  if (!pdf || !state.pageIds.length) { wrap.style.width = wrap.style.height = '0px'; return; }
-  const page = await pdf.getPage(state.cur + 1);
-  if (pdf !== state.pdfjs) return;
-  const base = page.getViewport({ scale: 1 });
-  state.pageSize = { w: base.width, h: base.height };
-  if (state.fit) {
-    const availW = $('#viewport').clientWidth - 40, availH = $('#viewport').clientHeight - 40;
-    const z = state.fit === 'page' ? Math.min(availW / base.width, availH / base.height) : availW / base.width;
-    state.zoom = availW > 100 ? Math.max(0.1, Math.min(8, z)) : 1;
-  }
-  const dpr = window.devicePixelRatio || 1;
-  const vp = page.getViewport({ scale: state.zoom * dpr });
-  const cssW = vp.width / dpr, cssH = vp.height / dpr;
-  canvas.width = overlay.width = Math.floor(vp.width); canvas.height = overlay.height = Math.floor(vp.height);
-  for (const c of [canvas, overlay]) { c.style.width = cssW + 'px'; c.style.height = cssH + 'px'; }
-  wrap.style.width = cssW + 'px'; wrap.style.height = cssH + 'px';
-  if (state.renderTask) { try { state.renderTask.cancel(); } catch (e) { } }
-  const task = page.render({ canvasContext: canvas.getContext('2d'), viewport: vp });
-  state.renderTask = task;
-  try { await task.promise; } catch (e) { if (e && e.name !== 'RenderingCancelledException') console.error(e); }
-  if (state.renderTask === task) state.renderTask = null;
-  $('#zoomLabel').textContent = Math.round(state.zoom * 100) + '%';
-  drawOverlay();
-  positionTextEditor();
-}
-
-/* ---------- thumbnails ---------- */
-let thumbQueue = [], thumbBusy = false;
-function renderThumbs() {
-  const cont = $('#thumbs'); cont.innerHTML = ''; thumbQueue = [];
-  const n = state.pageIds.length;
-  $('#pageCountLabel').textContent = n ? `(${n})` : '';
-  for (let i = 0; i < n; i++) {
-    const div = document.createElement('div'); div.className = 'thumb'; div.draggable = true; div.dataset.i = i;
-    const c = document.createElement('canvas'); c.width = 140; c.height = 180; div.appendChild(c);
-    const num = document.createElement('div'); num.className = 'num'; num.textContent = i + 1; div.appendChild(num);
-    div.addEventListener('click', e => {
-      if (e.ctrlKey || e.metaKey) { state.selectedPages.has(i) ? state.selectedPages.delete(i) : state.selectedPages.add(i); }
-      else if (e.shiftKey) { const a = Math.min(i, state.cur), b = Math.max(i, state.cur); for (let k = a; k <= b; k++) state.selectedPages.add(k); }
-      else { state.selectedPages.clear(); state.selectedPages.add(i); goTo(i); }
-      updateThumbClasses();
-    });
-    div.addEventListener('dragstart', e => { e.dataTransfer.setData('text/plain', String(i)); e.dataTransfer.effectAllowed = 'move'; });
-    div.addEventListener('dragover', e => { e.preventDefault(); div.classList.add('dragover'); });
-    div.addEventListener('dragleave', () => div.classList.remove('dragover'));
-    div.addEventListener('drop', e => {
-      e.preventDefault(); div.classList.remove('dragover');
-      const from = parseInt(e.dataTransfer.getData('text/plain'), 10);
-      if (!isNaN(from) && from !== i) movePage(from, i);
-    });
-    cont.appendChild(div);
-    thumbQueue.push({ i, c });
-  }
-  updateThumbClasses();
-  pumpThumbs();
-}
+/* ---------- drawing pages: see viewer.js ----------
+   These names stay because the rest of the app calls them. */
+async function renderPage() { try { await KamView.invalidate(); } catch (e) { console.error(e); } }
+function renderThumbs() { KamView.buildThumbs(); }
+function refreshThumb(i) { KamView.refreshThumb(i); }
 function updateThumbClasses() {
   $$('.thumb').forEach(d => {
     const i = +d.dataset.i;
     d.classList.toggle('current', i === state.cur);
     d.classList.toggle('selected', state.selectedPages.has(i));
   });
-}
-async function pumpThumbs() {
-  if (thumbBusy) return; thumbBusy = true;
-  while (thumbQueue.length) {
-    const { i, c } = thumbQueue.shift();
-    if (!c.isConnected) continue;
-    try { await renderThumb(i, c); } catch (e) { console.warn(e); }
-  }
-  thumbBusy = false;
-}
-async function renderThumb(i, c) {
-  const pdf = state.pdfjs; if (!pdf || i >= state.pageIds.length) return;
-  const key = state.pageIds[i] + ':' + state.doc.getPage(i).getRotation().angle;
-  let off = state.thumbCache.get(key);
-  if (!off) {
-    const page = await pdf.getPage(i + 1);
-    if (pdf !== state.pdfjs) return;
-    const vp1 = page.getViewport({ scale: 1 });
-    const sc = 280 / vp1.width;
-    const vp = page.getViewport({ scale: sc });
-    off = document.createElement('canvas'); off.width = Math.floor(vp.width); off.height = Math.floor(vp.height);
-    await page.render({ canvasContext: off.getContext('2d'), viewport: vp }).promise;
-    off._scale = sc;
-    if (state.thumbCache.size > 400) state.thumbCache.delete(state.thumbCache.keys().next().value);
-    state.thumbCache.set(key, off);
-  }
-  c.width = off.width; c.height = off.height;
-  const ctx = c.getContext('2d'); ctx.drawImage(off, 0, 0);
-  drawAnnots(ctx, state.pageIds[i], off._scale, null, { spell: false, marks: false });
-}
-let thumbRefreshTimer;
-function refreshThumb(i) {
-  clearTimeout(thumbRefreshTimer);
-  thumbRefreshTimer = setTimeout(() => {
-    const d = $(`.thumb[data-i="${i}"] canvas`); if (d) renderThumb(i, d);
-  }, 200);
 }
 
 /* ---------- navigation & zoom ---------- */
@@ -280,19 +185,12 @@ function updatePager() {
 }
 async function goTo(i) {
   if (!state.pageIds.length) return;
-  i = Math.max(0, Math.min(state.pageIds.length - 1, i));
   commitTextEdit();
-  state.cur = i; state.selected = null;
-  updatePager(); updateThumbClasses(); updateProps();
-  const t = $(`.thumb[data-i="${i}"]`); if (t) t.scrollIntoView({ block: 'nearest' });
-  if (typeof refreshLayers === 'function') refreshLayers(true);
-  await renderPage();
+  await KamView.goTo(i);
 }
 function setZoom(z, fit = '') {
-  state.fit = fit;
-  if (!fit) state.zoom = Math.max(0.1, Math.min(8, z));
   commitTextEdit();
-  renderPage();
+  return KamView.zoomTo(z, fit);
 }
 $('#btnZoomIn').onclick = () => setZoom(state.zoom * 1.25);
 $('#btnZoomOut').onclick = () => setZoom(state.zoom / 1.25);
@@ -301,12 +199,6 @@ $('#btnFitPage').onclick = () => setZoom(1, 'page');
 $('#btnPrev').onclick = () => goTo(state.cur - 1);
 $('#btnNext').onclick = () => goTo(state.cur + 1);
 $('#pageNum').addEventListener('change', e => goTo(parseInt(e.target.value, 10) - 1));
-$('#viewport').addEventListener('wheel', e => {
-  if (!e.ctrlKey) return; e.preventDefault();
-  setZoom(state.zoom * (e.deltaY < 0 ? 1.1 : 1 / 1.1));
-}, { passive: false });
-let resizeTimer;
-window.addEventListener('resize', () => { clearTimeout(resizeTimer); resizeTimer = setTimeout(() => { if (state.fit) renderPage(); }, 150); });
 window.addEventListener('beforeunload', e => { if (state.dirty) { e.preventDefault(); e.returnValue = ''; } });
 
 /* ---------- file inputs & drag/drop ---------- */

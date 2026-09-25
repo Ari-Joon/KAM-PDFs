@@ -33,15 +33,8 @@ const KamPanels = (() => {
     }
     refit();
   }
-  // Re-rendering the page on every pointermove would make dragging stutter on a big document,
-  // so a fit-to-width page catches up a moment after the divider stops moving.
-  let refitTimer = null;
-  function refit() {
-    clearTimeout(refitTimer);
-    refitTimer = setTimeout(() => {
-      if (typeof state !== 'undefined' && state.fit && typeof renderPage === 'function') renderPage();
-    }, 120);
-  }
+  // A fitted page catches up by itself: the viewer watches its own size (viewer.js).
+  function refit() { }
   function get(name) {
     const b = BARS[name];
     const raw = read(b.key);
