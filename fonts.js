@@ -51,6 +51,7 @@ const KamFonts = (() => {
         for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
         delete window.KAM_FONTS[key];                  // the base64 copy is no longer needed
         const f = { key, bytes, fk: fontkit.create(bytes) };
+        padSubsets(f.fk);
         bundledNow.set(key, f);
         return f;
       })();
@@ -58,6 +59,31 @@ const KamFonts = (() => {
       bundledCache.set(key, p);
     }
     return p;
+  }
+
+  /* fontkit cuts a font down to the letters used when it is saved into a PDF. For a small cut it
+     writes the glyph index in its short form, which can only point at even positions, but it
+     copies each glyph's bytes as they are, and Carlito's glyphs are often an odd number of bytes
+     long. Every glyph after the first odd one then pointed a byte out, and PDFium (Chrome, Edge,
+     most viewers) drew those letters blank, while pdf.js happened to cope. Padding each glyph to
+     an even length, which TrueType allows, puts every one back where the index says it is. */
+  function padSubsets(fk) {
+    let proto;
+    try { proto = Object.getPrototypeOf(fk.createSubset()); } catch (e) { return; }
+    if (!proto || proto.__kamPadded || typeof proto._addGlyph !== 'function') return;
+    const add = proto._addGlyph;
+    proto._addGlyph = function (gid) {
+      const r = add.call(this, gid);
+      const i = this.glyf.length - 1, buf = this.glyf[i];
+      if (buf && buf.length % 2) {
+        const B = buf.constructor, even = typeof B.alloc === 'function' ? B.alloc(buf.length + 1) : new Uint8Array(buf.length + 1);
+        if (typeof buf.copy === 'function') buf.copy(even); else even.set(buf);
+        this.glyf[i] = even;
+        this.offset += 1;
+      }
+      return r;
+    };
+    proto.__kamPadded = true;
   }
 
   /* What a PDF font is, from its name and the flags pdf.js worked out. */

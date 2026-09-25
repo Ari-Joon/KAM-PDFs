@@ -891,6 +891,138 @@ test('text on a turned page is edited where it is', async b => {
   ok(scr.differing / scr.total < 0.0002, `the screen and the saved file differ: ${scr.differing} pixels`);
 });
 
+// Where the ink of page 1 of a saved PDF starts and ends along the text line at display y
+// (y0..y1, points), at 4x: [left, right] in points.
+const inkSpan = (b64, y0, y1) => `(async () => {
+  const s = atob(${JSON.stringify(b64)}); const u = new Uint8Array(s.length);
+  for (let i = 0; i < s.length; i++) u[i] = s.charCodeAt(i);
+  const p = await (await pdfjsLib.getDocument({ data: u }).promise).getPage(1); const vp = p.getViewport({ scale: 4 });
+  const c = document.createElement('canvas'); c.width = vp.width; c.height = vp.height; const g = c.getContext('2d');
+  g.fillStyle = '#fff'; g.fillRect(0, 0, c.width, c.height); await p.render({ canvasContext: g, viewport: vp }).promise;
+  const d = g.getImageData(0, ${y0} * 4, c.width, (${y1} - ${y0}) * 4).data; let l = Infinity, r = -1;
+  for (let i = 0; i < d.length; i += 4) if (d[i] < 140) { const x = (i / 4) % c.width; if (x < l) l = x; if (x > r) r = x; }
+  return [l / 4, r / 4];
+})()`;
+
+test('an edit keeps a line lined up the way it was: justified, right-aligned or centred', async b => {
+  await b.reload();
+  await b.evaluate(makeDoc(`
+    const p = doc.addPage([500, 400]);
+    // a justified paragraph: each line's words spread to end exactly at x = 300
+    const lines = [['The', 'tenant', 'agrees', 'to', 'keep', 'the', 'property', 'clean'], ['and', 'in', 'good', 'repair', 'throughout', 'the', 'whole', 'term'], ['of', 'this', 'agreement.']];
+    lines.forEach((ws, li) => {
+      const y = 330 - li * 16, widths = ws.map(w => f.widthOfTextAtSize(w, 12));
+      const gap = li < 2 ? (260 - widths.reduce((a, b) => a + b, 0)) / (ws.length - 1) : f.widthOfTextAtSize(' ', 12);
+      let x = 40; ws.forEach((w, i) => { p.drawText(w, { x, y, size: 12, font: f }); x += widths[i] + gap; });
+    });
+    // a column of amounts lined up on the right at x = 400
+    ['£45.00', '£1,303.20', '£96.00'].forEach((t, i) => p.drawText(t, { x: 400 - f.widthOfTextAtSize(t, 12), y: 220 - i * 18, size: 12, font: f }));
+    // a centred title and subtitle, centred on x = 250
+    [['Annual Statement', 18], ['Prepared for the trustees', 12]].forEach(([t, s], i) => p.drawText(t, { x: 250 - f.widthOfTextAtSize(t, s) / 2, y: 120 - i * 26, size: s, font: f }));`));
+  await b.waitFor(settled);
+  eq(await b.evaluate(`KamContent.analyse(0).then(an => an.phrases.map(p => p.align + ':' + p.text.split(' ')[0]))`),
+    ['justify:The', 'justify:and', 'left:of', 'right:£45.00', 'right:£1,303.20', 'right:£96.00', 'center:Annual', 'center:Prepared'],
+    'each line knows how it is lined up');
+
+  await b.evaluate(editPhrase('The tenant', 'The tenant agrees to keep the property very clean'));
+  await b.evaluate(editPhrase('£45.00', '£1,045.00'));
+  await b.evaluate(editPhrase('Annual', 'Annual Statement 2024'));
+  await b.waitFor(settled);
+  const saved = await b.evaluate(exportBase64);
+  const orig = await b.evaluate(`(() => { let s = ''; const u = state.bytes; for (let i = 0; i < u.length; i += 0x8000) s += String.fromCharCode.apply(null, u.subarray(i, i + 0x8000)); return btoa(s); })()`);
+  const span = async (b64, y0, y1) => b.evaluate(inkSpan(b64, y0, y1));
+  const [j0, j1, a0, a1, t0, t1] = [await span(orig, 58, 74), await span(saved, 58, 74), await span(orig, 168, 184), await span(saved, 168, 184), await span(orig, 262, 284), await span(saved, 262, 284)];
+  near(j1[0], j0[0], 0.3, 'the justified line still starts at the margin');
+  near(j1[1], j0[1], 0.3, 'the justified line still reaches the right margin');
+  near(a1[1], a0[1], 0.3, 'the amount still ends on the right edge of its column');
+  near((t1[0] + t1[1]) / 2, 250, 0.9, 'the title is still centred');
+  const text = (await b.evaluate(textOf(saved)))[0].replace(/\s+/g, ' ');
+  ok(text.includes('keep the property very clean') && text.includes('£1,045.00') && text.includes('Annual Statement 2024'), `the edits read wrong: ${text}`);
+});
+
+test('a Word document is edited in its own fonts, with its tabs, bullets and justified lines kept', async b => {
+  const word = fs.readFileSync(path.join(__dirname, 'fixtures', 'word-tenancy.pdf')).toString('base64');
+  await b.reload();
+  await b.evaluate(openBase64(word, 'tenancy.pdf'));
+  await b.waitFor(settled);
+  const read = await b.evaluate(`KamContent.analyse(0).then(an => ({ ok: an.ok, reason: an.reason, phrases: an.phrases.map(p => [p.text.trim(), p.align]) }))`);
+  ok(read.ok, 'Word\'s PDF could not be read: ' + read.reason);
+  const has = (t, align) => read.phrases.some(([x, a]) => x === t && (!align || a === align));
+  ok(has('TA-2024-0098') && has('Signed: 12 March 2024'), 'a tab separates phrases, as it separates fields');
+  ok(has('•') && has('No pets without written consent'), 'a list bullet is not part of its item');
+  ok(read.phrases.filter(([, a]) => a === 'justify').length === 2, 'the two justified lines of the paragraph are known to be justified');
+
+  const boxes = await b.evaluate(boxesOf(['Monthly rent', 'Landlord', 'last stretches', 'No pets', '£45.00']));
+  const before = await b.evaluate(inkSpan(word, 197, 205));
+  await b.evaluate(editPhrase('Monthly rent', 'Monthly rent: £1,375.00 payable on the 1st of each month. '));   // '7' is not in Word's bold subset
+  await b.evaluate(editPhrase('Landlord', 'Landlord: Southwind Lettings Ltd of 14 Harbour Street, Bristol. ')); // nor is 'S'
+  await b.evaluate(editPhrase('last stretches', 'last stretches from the left margin to the right margin, and the gaps between the words are widened '));
+  await b.evaluate(editPhrase('No pets', ''));
+  await b.evaluate(editPhrase('£45.00', '£60.00 '));
+  await b.waitFor(settled);
+  const saved = await b.evaluate(exportBase64);
+
+  const text = (await b.evaluate(textOf(saved)))[0].replace(/\s+/g, ' ');
+  for (const want of ['Monthly rent: £1,375.00 payable', 'Landlord: Southwind Lettings Ltd', 'and the gaps between the words are widened', '£60.00'])
+    ok(text.includes(want), `"${want}" is missing from the saved file: ${text}`);
+  for (const gone of ['1,250.00', 'Northwind', 'spaces between', 'No pets', '£45.00'])
+    ok(!text.includes(gone), `"${gone}" is still in the saved file`);
+  // the justified line still reaches the right margin
+  const after = await b.evaluate(inkSpan(saved, 197, 205));
+  near(after[1], before[1], 0.6, 'the edited justified line still ends at the margin');
+  // nothing else on the page moved
+  eq(await b.evaluate(changedOutside(saved, boxes)), 0, 'pixels changed outside the edited lines');
+
+  // and PDFium, which Chrome, Edge and most viewers use, draws every letter of the edited lines,
+  // including those that came from the bundled fonts: each edited line has about as much ink as
+  // it had before (a letter drawn blank takes a large bite out of it)
+  const lines = boxes.slice(0, 2);
+  const inkBefore = pdfiumInkIn(Buffer.from(word, 'base64'), lines), inkAfter = pdfiumInkIn(Buffer.from(saved, 'base64'), lines);
+  if (inkBefore === null) console.log('      (PDFium check skipped: install pypdfium2 to enable it)');
+  else {
+    inkBefore.forEach((v, i) => ok(inkAfter[i] > 0.9 * v && inkAfter[i] < 1.15 * v, `PDFium draws edited line ${i + 1} with ${inkAfter[i]} dark pixels where it had ${v}: letters are missing`));
+    const fium = pdfiumText(Buffer.from(saved, 'base64'));
+    ok(/Monthly rent: £1,375\.00 payable/.test(fium) && /Southwind Lettings/.test(fium), `PDFium reads the edits wrong: ${fium}`);
+  }
+});
+
+test('every bundled font draws every letter once it is cut down and saved into a PDF', async b => {
+  await b.reload();
+  // Each font saved twice, whole and cut down to the letters used, the way edits are saved; in
+  // PDFium both must draw the same. (fontkit once cut Carlito so that most letters came out
+  // blank in Chrome and Edge, while pdf.js hid it.)
+  const docs = JSON.parse(await b.evaluate(`(async () => {
+    await KamFonts.ready();
+    const keys = ['Carlito', 'Caladea', 'LiberationSans', 'LiberationSerif', 'LiberationMono'].flatMap(f => ['Regular', 'Bold', 'Italic', 'BoldItalic'].map(s => f + '-' + s));
+    const out = {};
+    for (const key of keys) {
+      const font = await KamFonts.bundled(key);
+      for (const subset of [true, false]) {
+        const doc = await PDFLib.PDFDocument.create(); doc.registerFontkit(fontkit);
+        const f = await doc.embedFont(font.bytes, { subset });
+        const p = doc.addPage([520, 90]);
+        p.drawText('Southwind £1,375.00 Żółta gęślą Quality', { x: 10, y: 50, size: 22, font: f });
+        p.drawText('fjord (§12) “quoted” – ÀÉÎÕÜ ßçñ', { x: 10, y: 18, size: 22, font: f });
+        const bytes = await doc.save();
+        let s = ''; for (let i = 0; i < bytes.length; i += 0x8000) s += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+        out[key + (subset ? ':subset' : ':whole')] = btoa(s);
+      }
+    }
+    return JSON.stringify(out);
+  })()`));
+  const box = [[0, 0, 520, 90]];
+  let checked = 0;
+  for (const key of new Set(Object.keys(docs).map(k => k.split(':')[0]))) {
+    const whole = pdfiumInkIn(Buffer.from(docs[key + ':whole'], 'base64'), box);
+    if (whole === null) { console.log('      (PDFium check skipped: install pypdfium2 to enable it)'); return; }
+    const cut = pdfiumInkIn(Buffer.from(docs[key + ':subset'], 'base64'), box);
+    ok(whole[0] > 1000, `${key} drew nothing at all`);
+    ok(Math.abs(cut[0] - whole[0]) <= 0.01 * whole[0], `${key} cut down draws ${cut[0]} dark pixels, whole ${whole[0]}: letters are missing`);
+    checked++;
+  }
+  eq(checked, 20, 'all twenty bundled fonts were checked');
+});
+
 test('text edits can be hidden, retyped, taken back, and survive the window closing', async b => {
   await b.reload();
   await b.evaluate(makeDoc(`doc.addPage([420, 300]).drawText('Account holder: Jane Smith', { x: 30, y: 250, size: 14, font: f });`));
@@ -1943,6 +2075,37 @@ sys.stdout.buffer.write(("\\n".join(out)).encode("utf-8"))
     if (r.status === 0) {
       const out = (r.stdout || '');
       return out.trim() === 'SKIP' ? null : out.replace(/\r\n?/g, '\n');
+    }
+  }
+  return null;
+}
+
+/* PDFium's ink (dark pixels, at 2x) inside each of a list of boxes on page 1, in display points:
+   a letter PDFium cannot draw leaves its line with far less ink than it should have. null when
+   PDFium is missing. */
+function pdfiumInkIn(buf, boxes) {
+  const pdf = path.join(os.tmpdir(), 'kam-pdfium-ink.pdf');
+  fs.writeFileSync(pdf, buf);
+  const script = `
+import sys, json
+try:
+    import pypdfium2 as pdfium
+except Exception:
+    print("SKIP"); sys.exit(0)
+img = pdfium.PdfDocument(sys.argv[1])[0].render(scale=2).to_pil().convert("L")
+out = []
+for x0, y0, x1, y1 in json.loads(sys.argv[2]):
+    region = img.crop((int(x0 * 2), int(y0 * 2), int(x1 * 2), int(y1 * 2)))
+    out.append(sum(1 for v in region.tobytes() if v < 128))
+print(json.dumps(out))
+`;
+  const sp = path.join(os.tmpdir(), 'kam-pdfium-ink.py');
+  fs.writeFileSync(sp, script);
+  for (const py of ['python', 'python3']) {
+    const r = spawnSync(py, [sp, pdf, JSON.stringify(boxes)], { encoding: 'utf8' });
+    if (r.status === 0) {
+      const out = (r.stdout || '').trim();
+      return out === 'SKIP' ? null : JSON.parse(out);
     }
   }
   return null;

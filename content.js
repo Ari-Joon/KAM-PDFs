@@ -539,11 +539,18 @@ const KamContent = (() => {
           if (twin) { (prev.shadows = prev.shadows || []).push(g.id); g.shadowOf = prev.id; continue; }
           main.push(g);
         }
+        // A phrase ends at a gap wider than a word space can be: a tab, a table column, a list
+        // bullet's indent. Editing then moves only the words of the same phrase along. The
+        // widest word space a justified line uses is well under 0.75 em; a tab is rarely less.
+        // (Word writes a tab as an ordinary space followed by a jump: a space that travels three
+        // times its own width is a tab too.)
         let ph = null;
         for (const g of main) {
           const gap = ph ? g.u0 - ph.u1 : 0;
           const size = ph ? Math.max(ph.size, g.size) : g.size;
-          if (!ph || gap > 1.2 * size || gap < -0.5 * size) { ph = { gs: [g], u1: g.u1, size: g.size }; phrases.push(ph); }
+          const prev = ph && ph.gs[ph.gs.length - 1];
+          const tab = prev && /^\s$/.test(uniText(prev.uni)) && g.u0 - prev.u0 > Math.max(3 * (prev.u1 - prev.u0), 0.5 * size);
+          if (!ph || tab || gap > 0.75 * size || gap < -0.5 * size) { ph = { gs: [g], u1: g.u1, size: g.size }; phrases.push(ph); }
           else { ph.gs.push(g); ph.u1 = Math.max(ph.u1, g.u1); ph.size = Math.max(ph.size, g.size); }
         }
       }
@@ -591,8 +598,45 @@ const KamContent = (() => {
         box: boxOf(dir, perp, u0, u1, top, bot),
       });
     }
+    alignments(an, out);
     an.phrases = out;
     an.byKey = new Map(out.map(p => [p.key, p]));
+  }
+  /* How each line is aligned, judged from the lines around it: a word processor would keep a
+     right-aligned amount lined up on the right, a centred title centred, and a justified line
+     reaching both margins, and so should an edit. Lines of a paragraph or cells of a column are
+     neighbours: the same slant, similar size, close above or below, overlapping sideways. */
+  function alignments(an, list) {
+    const ink = p => {
+      const gs = p.glyphs.map(id => an.glyphs[id]).filter(g => /\S/.test(uniText(g.uni)));
+      return gs.length ? [Math.min(...gs.map(g => g.u0)), Math.max(...gs.map(g => g.u1))] : [p.u0, p.u1];
+    };
+    for (const p of list) [p.s, p.e] = ink(p);
+    const rightWith = new Map();
+    for (const p of list) {
+      const tol = 0.6 + 0.02 * p.size;
+      let left = false, right = false, centre = false, both = false;
+      const rw = [];
+      for (const q of list) {
+        if (q === p || Math.abs(q.angle - p.angle) > 0.5 || q.size < 0.5 * p.size || q.size > 2 * p.size) continue;
+        const dv = Math.abs(q.v - p.v);
+        if (dv < 0.5 * p.size || dv > 3 * Math.max(p.size, q.size)) continue;
+        if (q.e < p.s || q.s > p.e) continue;                    // not in the same column
+        const ds = Math.abs(q.s - p.s) < tol, de = Math.abs(q.e - p.e) < tol, dc = Math.abs((q.s + q.e) / 2 - (p.s + p.e) / 2) < tol;
+        if (ds && de) both = true;
+        else if (ds) left = true;
+        else if (de) { right = true; rw.push(q); }
+        else if (dc) centre = true;
+      }
+      const words = /\S\s+\S/.test(p.text.trim());
+      p.align = both && words ? 'justify' : right && !left ? 'right' : centre && !left && !right ? 'center' : 'left';
+      rightWith.set(p, rw);
+    }
+    // the indented first line of a justified paragraph lines up only on the right, but with lines
+    // that are justified: it is justified too, not right-aligned
+    for (const p of list) {
+      if (p.align === 'right' && /\S\s+\S/.test(p.text.trim()) && rightWith.get(p).some(q => q.align === 'justify')) p.align = 'justify';
+    }
   }
   // A box in the same shape the marks use: top-left corner, width, height, rotation.
   function boxOf(dir, perp, u0, u1, top, bot) {
@@ -728,7 +772,17 @@ const KamContent = (() => {
     const x0 = p < q ? ph.chars[p].u0 : p > 0 ? ph.chars[p - 1].u1 : ph.chars.length ? ph.chars[0].u0 : ph.u0;
     const oldEnd = q < old.length ? ph.chars[q].u0 : (p < q ? ph.chars[old.length - 1].u1 : x0);
 
-    // 4. lay out the new letters in the reference glyph's style
+    // 4. lay out the new letters in the reference glyph's style. Letter spacing is the one that
+    // prevails among the letters being replaced, not the reference glyph's own: Word, for one,
+    // kerns a pair like "TA" by giving just those two letters their own tight spacing, and every
+    // new letter squeezed up like that made the word visibly short.
+    const tcOf = ids => {
+      const count = new Map();
+      for (const id of ids) { const v = an.ops[glyphs[id].op].Tc; count.set(v, (count.get(v) || 0) + 1); }
+      let best = rop.Tc, n = 0; for (const [v, c] of count) if (c > n) { best = v; n = c; }
+      return best;
+    };
+    const st = { Tc: tcOf(gone.size ? [...gone] : [refId]), Tw: rop.Tw };
     const Tfs = rop.size, Th = rop.Th, kr = ref.kx;
     const toDisp = t => t * kr;                                  // text-space length -> display points
     const seen = seenFor(rop.font);
@@ -738,16 +792,27 @@ const KamContent = (() => {
       piece.items.push(item);
     };
     const spaceNat = encodeOrig(rfont, 32, seen);
-    const spaceWant = ph.spaceAdv > 0 ? ph.spaceAdv : spaceNat ? toDisp((spaceNat.w0 * Tfs + rop.Tc + (spaceNat.space ? rop.Tw : 0)) * Th) : 0.25 * ref.size;
-    let x = 0;                                                   // text-space offset from the start of the new letters
-    const midChars = [];
-    const tStart = (x0 - ref.u0) / kr;                           // where the new letters start, along the reference glyph's line
-    const Tm0 = mul(tr(tStart * (ref.tx < 0 ? -1 : 1), 0), ref.Tm);
-    // a space is as wide as the line's own spaces, measured, so justified text stays even
-    const putSpace = () => {
-      const want = spaceWant / kr;
+    const spaceWant = ph.spaceAdv > 0 ? ph.spaceAdv : spaceNat ? toDisp((spaceNat.w0 * Tfs + st.Tc + (spaceNat.space ? st.Tw : 0)) * Th) : 0.25 * ref.size;
+    // Word gaps in the new wording: which gap comes before each character, and how many there
+    // are. A gap is a run of spaces with words on both sides.
+    const gapsBefore = new Array(text.length).fill(0);
+    let G = 0;
+    { let word = false, inGap = false;
+      for (let i = 0; i < text.length; i++) {
+        if (/\s/.test(text[i])) { if (word) inGap = true; }
+        else { if (inGap) { G++; inGap = false; } word = true; }
+        gapsBefore[i] = G;
+      } }
+    // does the run of spaces starting at i sit between two words?
+    const countedGap = i => /\S/.test(text.slice(0, i)) && text.slice(i).search(/\S/) > 0;
+    let x = 0, cut = 0;                                          // text-space offset from the start of the new letters
+    let midChars = [];
+    // a space is as wide as the line's own spaces, measured, so justified text stays even (less
+    // `cut` on a justified line, below)
+    const putSpace = gap => {
+      const want = spaceWant / kr - (gap ? cut / kr : 0);
       if (spaceNat) {
-        const nat = (spaceNat.w0 * Tfs + rop.Tc + (spaceNat.space ? rop.Tw : 0)) * Th;
+        const nat = (spaceNat.w0 * Tfs + st.Tc + (spaceNat.space ? st.Tw : 0)) * Th;
         push('orig', '', { bytes: spaceNat.bytes, ch: ' ', x, tx: nat });
         if (Math.abs(want - nat) > 1e-6) push('orig', '', { move: want - nat });
       } else push('orig', '', { move: want });
@@ -755,7 +820,7 @@ const KamContent = (() => {
     };
     // a letter in the PDF's own font, where the word can be written in it
     const putOwn = (ch, enc) => {
-      const tx = (enc.w0 * Tfs + rop.Tc + (enc.space ? rop.Tw : 0)) * Th;
+      const tx = (enc.w0 * Tfs + st.Tc + (enc.space ? st.Tw : 0)) * Th;
       push('orig', '', { bytes: enc.bytes, code: enc.code, ch, x, tx });
       x += tx;
     };
@@ -766,50 +831,64 @@ const KamContent = (() => {
       if (!b) { need(key); const tx = 0.5 * Tfs * Th; push('fb', key, { ch, x, tx, pending: true }); x += tx; }
       else if (!gl) res.missing.push(ch);                         // takes no room; the caret still steps over it
       else {
-        const tx = (gl.advanceWidth / b.fk.unitsPerEm * Tfs + rop.Tc) * Th;
+        const tx = (gl.advanceWidth / b.fk.unitsPerEm * Tfs + st.Tc) * Th;
         push('fb', key, { ch, x, tx, fk: b.fk, glyph: gl });
         x += tx;
       }
     };
-    for (const word of mid.match(/\s+|\S+/g) || []) {
-      const encs = /^\s/.test(word) ? null : [...word].map(ch => encodeOrig(rfont, ch.codePointAt(0), seen));
-      const own = encs && encs.every(Boolean);
-      let k = 0;
-      for (const ch of word) {
-        const a = x;
-        if (!encs) putSpace();
-        else if (own) putOwn(ch, encs[k]);
-        else putBundled(ch, ch.codePointAt(0));
-        k++;
-        for (let n = 0; n < ch.length; n++) midChars.push([a, x]);
+    const layMid = () => {
+      pieces.length = 0; piece = null; x = 0; midChars = [];
+      let at = p;                                                // index in the new wording
+      for (const word of mid.match(/\s+|\S+/g) || []) {
+        const encs = /^\s/.test(word) ? null : [...word].map(ch => encodeOrig(rfont, ch.codePointAt(0), seen));
+        const own = encs && encs.every(Boolean);
+        let k = 0, first = true;
+        for (const ch of word) {
+          const a = x;
+          if (!encs) { putSpace(first && countedGap(at)); first = false; }
+          else if (own) putOwn(ch, encs[k]);
+          else putBundled(ch, ch.codePointAt(0));
+          k++; at += ch.length;
+          for (let n = 0; n < ch.length; n++) midChars.push([a, x]);
+        }
       }
-    }
-    const W = toDisp(x);
-    const du = q < old.length ? x0 + W - oldEnd : 0;             // how far the rest of the line moves
-    res.du = du;
+    };
+    layMid();
 
-    // 5. the rest of the line: kept where it is, or moved along by du
-    const shifted = new Set();
-    if (q < old.length && Math.abs(du) > 1e-3) {
-      for (let i = q; i < ph.chars.length; i++) {
-        const id = ph.chars[i].g; if (id === null || gone.has(id)) continue;
-        for (const g of [id, ...(glyphs[id].shadows || [])]) shifted.add(g);
-      }
-      for (const id of shifted) { const g = glyphs[id]; res.shift.set(id, du / g.kx * (g.dir[0] * ph.dir[0] + g.dir[1] * ph.dir[1] < 0 ? -1 : 1) * (g.tx < 0 ? -1 : 1)); }
-    }
+    // 5. where everything goes. The new letters take their width where the old ones took
+    // oldEnd - x0, and the difference is made up the way the line is aligned: a left-aligned
+    // line's rest moves along; a right-aligned line's beginning moves back; a centred line does
+    // half of each; a justified line's word gaps, all of them, take up the difference so that it
+    // still reaches both margins (within reason: gaps are not squeezed shut or pulled wide open).
+    const grow0 = x0 + toDisp(x) - oldEnd;
+    const align = Math.abs(grow0) > 1e-3 ? ph.align || 'left' : 'left';
+    let per = 0;                                                 // taken off each word gap, justified lines
+    if (align === 'justify' && G > 0) { per = Math.max(-2 * spaceWant, Math.min(0.6 * spaceWant, grow0 / G)); cut = per; if (per) layMid(); }
+    const dn = text.length - old.length;                         // old index + dn = new index, after the change
+    const preMove = i => (align === 'right' ? -grow0 : align === 'center' ? -grow0 / 2 : -per * gapsBefore[i]);
+    const sufMove = i => (align === 'right' ? 0 : align === 'center' ? grow0 / 2 : grow0 - per * (gapsBefore[i + dn] || 0));
+    const sMid = p < text.length ? preMove(p) : align === 'right' ? -grow0 : align === 'center' ? -grow0 / 2 : -per * G;
+    res.du = q < old.length ? sufMove(q) : 0;
+    const moveOf = new Map();                                    // glyph -> how far it moves, in display points
+    const moveGlyph = (id, m) => { if (Math.abs(m) > 1e-3) for (const g of [id, ...(glyphs[id].shadows || [])]) moveOf.set(g, m); };
+    for (let i = 0; i < p; i++) { const id = ph.chars[i].g; if (id !== null && !gone.has(id)) moveGlyph(id, preMove(i)); }
+    for (let i = q; i < old.length; i++) { const id = ph.chars[i].g; if (id !== null && !gone.has(id)) moveGlyph(id, sufMove(i)); }
+    for (const [id, m] of moveOf) { const g = glyphs[id]; res.shift.set(id, m / g.kx * (g.dir[0] * ph.dir[0] + g.dir[1] * ph.dir[1] < 0 ? -1 : 1) * (g.tx < 0 ? -1 : 1)); }
     res.removed = gone;
+    const tStart = (x0 + sMid - ref.u0) / kr;                    // where the new letters start, along the reference glyph's line
+    const Tm0 = mul(tr(tStart * (ref.tx < 0 ? -1 : 1), 0), ref.Tm);
 
     // 6. positions of every character of the new wording, for the caret
-    for (let i = 0; i < p; i++) res.chars.push([ph.chars[i].u0, ph.chars[i].u1]);
-    for (const [a, b] of midChars) res.chars.push([x0 + toDisp(a), x0 + toDisp(b)]);
-    for (let i = q; i < old.length; i++) res.chars.push([ph.chars[i].u0 + du, ph.chars[i].u1 + du]);
+    for (let i = 0; i < p; i++) { const m = preMove(i); res.chars.push([ph.chars[i].u0 + m, ph.chars[i].u1 + m]); }
+    for (const [a, b] of midChars) res.chars.push([x0 + sMid + toDisp(a), x0 + sMid + toDisp(b)]);
+    for (let i = q; i < old.length; i++) { const m = sufMove(i); res.chars.push([ph.chars[i].u0 + m, ph.chars[i].u1 + m]); }
 
     // 7. what to draw on screen: kept glyphs, moved glyphs, and the new ones
     const VT = an.VT;
     for (const id of ph.all) {
       if (gone.has(id)) continue;
       const g = glyphs[id], op = an.ops[g.op], font = an.fontOf(op.font);
-      const d = shifted.has(id) ? du : 0;
+      const d = moveOf.get(id) || 0;
       const df = drawFontFor(font); if (df.need) { need(df.need); continue; }
       let glyph = null;
       if (df.own && g.fontChar) glyph = KamFonts.glyphFor(df.fk, g.fontChar.codePointAt(0));
@@ -835,7 +914,7 @@ const KamContent = (() => {
     }
 
     // 7. what to write into the file, beside the reference glyph's text operation
-    if (pieces.some(pc => pc.items.some(it => it.bytes || it.ch))) res.ins.push({ op: rop.id, at: { g: refId, before }, Tm: Tm0, pieces });
+    if (pieces.some(pc => pc.items.some(it => it.bytes || it.ch))) res.ins.push({ op: rop.id, at: { g: refId, before }, Tm: Tm0, pieces, st });
 
     // 8. the box around the result
     const us = res.chars.length ? res.chars.flatMap(c => c) : [ph.u0, ph.u1];
@@ -987,7 +1066,9 @@ const KamContent = (() => {
   // the rest of the text object carries on exactly as it would have.
   function insertion(op, ins, fbName, pos) {
     const k = 1000 / (op.size * op.Th), size = fmt(op.size), own = nameTok(op.res);
-    let s = `\n${fmtM(ins.Tm)} Tm\n`, cur = '';
+    // the letter spacing the new letters were laid out with, if it is not the one in force here
+    const tc = ins.st && Math.abs(ins.st.Tc - op.Tc) > 1e-9 ? ins.st.Tc : null;
+    let s = `\n${fmtM(ins.Tm)} Tm\n` + (tc !== null ? `${fmt(tc)} Tc\n` : ''), cur = '';
     for (const pc of ins.pieces) {
       const font = pc.kind === 'fb' ? pc.key : '';
       if (font !== cur) { s += `${font ? fbName(pc.key) : own} ${size} Tf\n`; cur = font; }
@@ -1000,6 +1081,7 @@ const KamContent = (() => {
       if (parts.length) s += '[' + parts.join(' ') + '] TJ\n';
     }
     if (cur) s += `${own} ${size} Tf\n`;
+    if (tc !== null) s += `${fmt(op.Tc)} Tc\n`;
     s += `${fmtM(op.Tlm)} Tm\n`;
     if (Math.abs(pos) > 1e-9) s += `[${fmt(-pos * k)}] TJ\n`;
     return s;
