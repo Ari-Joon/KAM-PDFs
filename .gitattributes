@@ -1,0 +1,16 @@
+# Files git must never treat as text. A PDF is mostly binary, but some are plain enough that git
+# guesses "text", and then changes their line endings on checkout, which breaks them.
+*.pdf binary
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.ttf binary
+*.otf binary
+*.woff binary
+*.woff2 binary
+*.wasm binary
+*.traineddata binary
+*.zip binary
+*.gz binary
