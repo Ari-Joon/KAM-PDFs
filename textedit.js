@@ -84,7 +84,7 @@ const KamEdit = (() => {
     KamView.invalidate(pi);                    // the page underneath, redrawn without this line
     drawOverlay();
     if (typeof touchGrab === 'function') touchGrab();
-    $('#hint').textContent = 'Editing the page’s own text, in its own font. Enter or Esc when you are done.';
+    $('#hint').textContent = 'Editing in the page’s own font. Enter or Esc to finish.';
     return true;
   }
   // A phone's keyboard takes the bottom of the screen when it opens: keep the line in view.

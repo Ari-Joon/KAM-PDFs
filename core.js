@@ -126,7 +126,7 @@ function askPassword(name) {
     const h = document.createElement('h3'); h.textContent = 'This PDF is locked with a password';
     const p = document.createElement('p'); p.className = 'choice-msg';
     p.textContent = tries ? 'That password is not right. Check it and try again.' : `Enter the password to open “${name}”. It is only used here, on this computer, and is not kept.`;
-    const input = document.createElement('input'); input.type = 'password'; input.id = 'pdfPassword'; input.autocomplete = 'off'; input.style.width = '100%';
+    const input = document.createElement('input'); input.type = 'password'; input.id = 'pdfPassword'; input.autocomplete = 'off'; input.style.width = '100%'; input.style.margin = '2px 0 14px';
     const row = document.createElement('div'); row.className = 'row choice-row';
     const cancel = document.createElement('button'); cancel.textContent = 'Cancel';
     const ok = document.createElement('button'); ok.textContent = 'Open'; ok.className = 'primary';

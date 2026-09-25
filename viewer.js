@@ -175,6 +175,8 @@ const KamView = (() => {
     // Read the text of the page you are on straight away (it takes a few milliseconds once the
     // page is drawn), so the first click on a word already knows exactly what it is.
     if (i === state.cur && typeof KamContent !== 'undefined') setTimeout(() => { if (i < state.pageIds.length) KamContent.analyse(i).catch(() => null); }, 30);
+    // and its links, so the pointer's first pass over one already says where it goes
+    if (typeof KamLinks !== 'undefined') setTimeout(() => { if (i < state.pageIds.length) KamLinks.linksOf(i).catch(() => null); }, 40);
     if (i === state.cur && typeof positionTextEditor === 'function') positionTextEditor();
     if (i === state.cur && typeof KamEdit !== 'undefined') KamEdit.position();
   }
