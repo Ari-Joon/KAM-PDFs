@@ -5,16 +5,24 @@
 'use strict';
 const KamPdfText = (() => {
   let docRef = null;
-  const pages = new Map();           // page index -> { runs }
+  const pages = new Map();           // page index -> { runs, sig }
+  // A page whose own text has been edited is read from its edited copy (content.js), so Find
+  // and copying see the words as they are now. sig says which edits a reading is of.
+  const sigOf = pi => (typeof KamPatch !== 'undefined' ? KamPatch.sigFor(pi) : '');
 
   function reset() { pages.clear(); docRef = null; }
-  function cached(pi) { if (docRef !== state.pdfjs) reset(); return pages.get(pi) || null; }
+  function cached(pi) {
+    if (docRef !== state.pdfjs) reset();
+    const e = pages.get(pi);
+    return e && e.sig === sigOf(pi) ? e : null;
+  }
 
   async function index(pi) {
     if (docRef !== state.pdfjs) { pages.clear(); docRef = state.pdfjs; }
-    if (pages.has(pi)) return pages.get(pi);
+    const sig = sigOf(pi), hit = pages.get(pi);
+    if (hit && hit.sig === sig) return hit;
     const pdf = state.pdfjs;
-    const page = await pdf.getPage(pi + 1);
+    const page = await KamView.pdfPage(pi);
     if (pdf !== state.pdfjs) return { runs: [] };
     const vp = page.getViewport({ scale: 1 });
     const tc = await page.getTextContent();
@@ -32,7 +40,7 @@ const KamPdfText = (() => {
       const dir = [dx / L, dy / L], perp = [dir[1], -dir[0]];         // perp points "up" the glyphs
       const st = tc.styles[it.fontName] || {};
       let fontLabel = '';
-      try { if (page.commonObjs.has(it.fontName)) fontLabel = page.commonObjs.get(it.fontName).name || ''; } catch (err) { }
+      try { if (page.commonObjs.has(it.fontName)) fontLabel = (page.commonObjs.get(it.fontName) || {}).name || ''; } catch (err) { }
       raw.push({
         str: it.str, dir, perp, rot: Math.atan2(dy, dx) * 180 / Math.PI, size,
         u0: x0 * dir[0] + y0 * dir[1], u1: x1 * dir[0] + y1 * dir[1], v: x0 * perp[0] + y0 * perp[1],
@@ -87,7 +95,7 @@ const KamPdfText = (() => {
       }
       runs.forEach((r, i) => { r.idx = i; });
     }
-    const entry = { runs };
+    const entry = { runs, sig };
     pages.set(pi, entry);
     return entry;
   }

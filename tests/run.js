@@ -103,6 +103,19 @@ async function browser() {
       // every script has run once the last ones (the command search, the viewer) are there
       await waitFor(`typeof state !== 'undefined' && typeof pdfTextEditAt === 'function' && typeof KamSpell !== 'undefined' && typeof KamPalette !== 'undefined' && typeof KamView !== 'undefined'`);
     },
+    // Print an HTML page to PDF with Chrome itself, the way "Save as PDF" makes documents:
+    // real fonts, embedded as subsets, every letter placed on its own. Returns base64.
+    printHtml: async html => {
+      const f = path.join(os.tmpdir(), 'kam-test-print.html');
+      fs.writeFileSync(f, html);
+      await send('Page.navigate', { url: 'file:///' + f.replace(/\\/g, '/') });
+      for (let i = 0; i < 80; i++) {
+        try { if (await evaluate(`document.readyState === 'complete' && document.fonts.status === 'loaded' && location.protocol === 'file:'`)) break; } catch (e) { }
+        await sleep(100);
+      }
+      const r = await send('Page.printToPDF', { printBackground: true, preferCSSPageSize: true });
+      return r.result.data;
+    },
     close: () => { try { ws.close(); } catch (e) { } proc.kill(); },
   };
 }
@@ -174,6 +187,67 @@ const textOf = b64 => `(async () => {
   }
   return out;
 })()`;
+
+// Type into the line being edited (the hidden input textedit.js uses), then press a key.
+const typeInto = (fn, key) => `(() => {
+  const t = document.getElementById('phraseInput'); (${fn})(t); t.dispatchEvent(new Event('input'));
+  ${key ? `t.dispatchEvent(new KeyboardEvent('keydown', { key: ${JSON.stringify(key)}, bubbles: true }));` : ''}
+  return t.value; })()`;
+
+// The fonts page 1 of a base64 PDF draws with, by their PostScript names, sorted.
+const fontsOfSaved = b64 => `(async () => {
+  const s = atob(${JSON.stringify(b64)}); const u = new Uint8Array(s.length);
+  for (let i = 0; i < s.length; i++) u[i] = s.charCodeAt(i);
+  const d = await PDFLib.PDFDocument.load(u);
+  const fonts = d.getPage(0).node.Resources().lookup(PDFLib.PDFName.of('Font'));
+  return fonts.keys().map(k => fonts.lookup(k).lookup(PDFLib.PDFName.of('BaseFont')).decodeText().replace(/^[A-Z]{6}[+]/, '')).sort();
+})()`;
+
+// Page 1 of a saved PDF against the original page, at 2x: how many pixels changed inside a
+// box (display points) and outside it, and how many are red inside it in the saved one.
+const comparePages = (b64, [x0, y0, x1, y1]) => `(async () => {
+  const s = atob(${JSON.stringify(b64)}); const u = new Uint8Array(s.length);
+  for (let i = 0; i < s.length; i++) u[i] = s.charCodeAt(i);
+  const saved = await (await pdfjsLib.getDocument({ data: u }).promise).getPage(1);
+  const orig = await state.pdfjs.getPage(1);
+  const draw = async p => { const vp = p.getViewport({ scale: 2 }); const c = document.createElement('canvas'); c.width = vp.width; c.height = vp.height;
+    const g = c.getContext('2d'); g.fillStyle = '#fff'; g.fillRect(0, 0, c.width, c.height); await p.render({ canvasContext: g, viewport: vp }).promise;
+    return { d: g.getImageData(0, 0, c.width, c.height).data, w: c.width, h: c.height }; };
+  const A = await draw(orig), B = await draw(saved);
+  let inside = 0, outside = 0, redInside = 0;
+  for (let y = 0; y < A.h; y++) for (let x = 0; x < A.w; x++) {
+    const i = (y * A.w + x) * 4, inBox = x >= ${x0 * 2} && x <= ${x1 * 2} && y >= ${y0 * 2} && y <= ${y1 * 2};
+    if (inBox && B.d[i] > 150 && B.d[i + 1] < 90 && B.d[i + 2] < 90) redInside++;
+    if (Math.abs(A.d[i] - B.d[i]) + Math.abs(A.d[i + 1] - B.d[i + 1]) + Math.abs(A.d[i + 2] - B.d[i + 2]) < 30) continue;
+    if (inBox) inside++; else outside++;
+  }
+  return { inside, outside, redInside };
+})()`;
+
+// What the screen draws for page 1 (edits included) against the saved file, at 2x.
+const screenVsSaved = (b64, pageIndex = 0) => `(async () => {
+  const s = atob(${JSON.stringify(b64)}); const u = new Uint8Array(s.length);
+  for (let i = 0; i < s.length; i++) u[i] = s.charCodeAt(i);
+  const saved = await (await pdfjsLib.getDocument({ data: u }).promise).getPage(${pageIndex + 1});
+  const shown = await KamView.pdfPage(${pageIndex});
+  const draw = async p => { const vp = p.getViewport({ scale: 2 }); const c = document.createElement('canvas'); c.width = vp.width; c.height = vp.height;
+    const g = c.getContext('2d'); g.fillStyle = '#fff'; g.fillRect(0, 0, c.width, c.height); await p.render({ canvasContext: g, viewport: vp }).promise;
+    drawAnnots(g, state.pageIds[${pageIndex}], 2, null, { spell: false, marks: false });
+    return g.getImageData(0, 0, c.width, c.height).data; };
+  const A = await draw(shown), B = await draw(saved);
+  let differing = 0;
+  for (let i = 0; i < A.length; i += 4) if (Math.abs(A[i] - B[i]) + Math.abs(A[i + 1] - B[i + 1]) + Math.abs(A[i + 2] - B[i + 2]) > 60) differing++;
+  return { differing, total: A.length / 4 };
+})()`;
+
+// Every stream in a saved PDF, decompressed, as text: for checking something is really gone.
+function streamsOf(buf) {
+  const zlib = require('zlib'), out = [buf.toString('latin1')];
+  for (const m of buf.toString('latin1').matchAll(/stream\r?\n([\s\S]*?)endstream/g)) {
+    try { out.push(zlib.inflateSync(Buffer.from(m[1], 'latin1')).toString('latin1')); } catch (e) { }
+  }
+  return out;
+}
 
 /* ---------- the tests ---------- */
 
@@ -278,34 +352,42 @@ test('marks over a form field survive saving (v1.8.1 regression)', async b => {
   else ok(fium === 0, `PDFium still renders ${fium} ink pixels behind the whiteout`);
 });
 
-test('existing text can be edited in place', async b => {
+test('existing text is edited in place, in its own font, and the old words are gone', async b => {
   await b.reload();
   await b.evaluate(makeDoc(`
     const p = doc.addPage([595, 842]);
     p.drawText('Quarterly report', { x: 48, y: 746, size: 26, font: fb, color: rgb(0.1,0.1,0.12) });
     p.drawText('Total due: 1,399.20', { x: 48, y: 642, size: 14, font: ft, color: rgb(0.8,0.1,0.1) });`));
   await b.waitFor(settled);
-  await b.evaluate(`KamPdfText.index(0)`);
-
-  const run = await b.evaluate(`(r => r && ({ text: r.text, size: +r.size.toFixed(1) }))(KamPdfText.runAt(0, 100, 196))`);
-  eq(run.text, 'Total due: 1,399.20', 'found the line under the cursor');
+  // the page's own text is read as soon as the page is drawn
+  await b.waitFor(`KamContent.cached(0) && KamContent.cached(0).ok`);
+  eq(await b.evaluate(`(it => it && it.text)(KamContent.phraseAt(0, 100, 196))`), 'Total due: 1,399.20', 'found the line under the cursor');
 
   eq(await b.evaluate(`pdfTextEditAt(100, 196)`), true, 'double-click starts editing');
-  const picked = await b.evaluate(`JSON.stringify((l => { const a = l[l.length-1]; return { text: a.text, size: a.size, font: a.font, colour: a.color, x: Math.round(a.x) }; })(curAnnots()))`);
-  const p = JSON.parse(picked);
-  eq(p.text, 'Total due: 1,399.20', 'original text picked up');
-  eq(p.size, 14, 'original size kept');
-  eq(p.font, 'TimesRoman', 'serif font recognised');
-  eq(p.x, 48, 'starts at the original x');
-  ok(/^#c[0-9a-f]{5}$/.test(p.colour) || p.colour.startsWith('#c'), `red ink picked up, got ${p.colour}`);
+  eq(await b.evaluate(`KamEdit.active()`), true, 'the line is open for typing');
+  eq(await b.evaluate(`curAnnots().length`), 0, 'nothing is added until the edit is done');
+  await b.evaluate(typeInto(`t => { const k = t.value.indexOf('399'); t.setRangeText('4', k, k + 1, 'end'); }`, 'Enter'));
+  eq(await b.evaluate(`KamEdit.active()`), false, 'Enter finishes the edit');
+  eq(await b.evaluate(`curAnnots().filter(a => a.type === 'textedit').map(a => [a.src.text, a.text])`),
+    [['Total due: 1,399.20', 'Total due: 1,499.20']], 'the edit is recorded against the original line');
+  await b.waitFor(settled);
 
-  await b.evaluate(`(() => { const t = document.getElementById('textEditor'); t.value = 'Total due: 1,499.20'; t.dispatchEvent(new Event('input')); commitTextEdit(); return 1; })()`);
   const b64 = await b.evaluate(exportBase64);
   const pages = await b.evaluate(textOf(b64));
-  ok(pages[0].includes('1,499.20'), 'edited value is in the saved file');
-  // Editing covers the original and writes new text over it, so the old words are still in
-  // the file. Redact is the tool that actually removes them; the README says so.
-  ok(pages[0].includes('1,399.20'), 'editing is expected to leave the original text extractable');
+  ok(pages[0].includes('Total due: 1,499.20'), `edited value missing from the saved file: ${pages[0]}`);
+  ok(!pages[0].includes('1,399.20'), 'the old value is still in the saved file');
+  // every letter was available in the page's own Times, so no other font was brought in
+  eq(await b.evaluate(fontsOfSaved(b64)), ['Helvetica-Bold', 'Times-Roman'], 'the saved page uses only its original fonts');
+
+  // Nothing but the changed digit moves: outside the line the saved page is the original,
+  // pixel for pixel, and the red is still red.
+  const px = await b.evaluate(comparePages(b64, [48, 186, 200, 206]));
+  eq(px.outside, 0, 'pixels changed outside the edited line');
+  ok(px.inside > 10, `the edited digit should look different, ${px.inside} pixels do`);
+  ok(px.redInside > 40, `the edited line lost its colour: ${px.redInside} red pixels`);
+  // and the screen shows exactly what was saved
+  const scr = await b.evaluate(screenVsSaved(b64));
+  ok(scr.differing / scr.total < 0.0002, `the screen and the saved file differ: ${scr.differing} pixels`);
 });
 
 test('existing text can be selected, copied and deleted', async b => {
@@ -317,6 +399,7 @@ test('existing text can be selected, copied and deleted', async b => {
     p.drawText('Third and final line here', { x: 30, y: 190, size: 14, font: f });`));
   await b.waitFor(settled);
   await b.evaluate(`KamPdfText.index(0)`);
+  await b.evaluate(`KamContent.analyse(0).then(() => 1)`);
   await b.evaluate(`setTool('select')`);
 
   eq(await b.evaluate(`KamPdfText.runsOf(0).map(r => r.text)`),
@@ -341,11 +424,11 @@ test('existing text can be selected, copied and deleted', async b => {
   ok(c.okc === true, 'copy reported failure');
   ok(c.got && c.got.startsWith('First line'), 'the wrong text reached the clipboard');
 
-  // click a line, press Delete, and it should be covered
+  // click a line, press Delete, and it goes
   await b.evaluate(`pdfTextClearPick(); pdfTextSelect(60, 78); 1`);
   const before = await b.evaluate(`curAnnots().length`);
   eq(await b.evaluate(`pdfTextDeleteSelected()`), true, 'Delete removes the picked line');
-  eq(await b.evaluate(`curAnnots().length`), before + 1, 'a cover was added');
+  eq(await b.evaluate(`curAnnots().length`), before + 1, 'the deletion is recorded');
 });
 
 test('find locates text across pages', async b => {
@@ -491,6 +574,7 @@ test('deleting a line removes it but keeps the rest of the page', async b => {
     p.drawText('KEEPME-second survivor', { x: 30, y: 170, size: 14, font: f }); // display y ~130`));
   await b.waitFor(settled);
   await b.evaluate(`KamPdfText.index(0)`);
+  await b.evaluate(`KamContent.analyse(0).then(() => 1)`);
   await b.evaluate(`setTool('select')`);
 
   eq(await b.evaluate(`(r => r && r.text)(KamPdfText.runAt(0, 60, 46))`), 'DELETEME-secret line', 'found the line to delete');
@@ -509,27 +593,82 @@ test('deleting a line removes it but keeps the rest of the page', async b => {
   ok(pages[0].includes('KEEPME-first survivor'), 'the rest of the page lost its text');
   ok(pages[0].includes('KEEPME-second survivor'), 'the rest of the page lost its text');
 
-  // and not hiding in a compressed stream either
-  const buf = Buffer.from(b64, 'base64');
-  const zlib = require('zlib');
-  let leaked = buf.includes('DELETEME');
-  for (const m of buf.toString('latin1').matchAll(/stream\r?\n([\s\S]*?)endstream/g)) {
-    try { if (zlib.inflateSync(Buffer.from(m[1], 'latin1')).includes('DELETEME')) leaked = true; } catch (e) { }
-  }
+  // and not hiding in a compressed stream either, as text or as the character codes pdf-lib
+  // wrote it with, nor in the page's old content stream left behind unused
+  const leaked = streamsOf(Buffer.from(b64, 'base64')).some(t => t.includes('DELETEME') || /44454C4554454D45/i.test(t));
   ok(!leaked, 'deleted words found inside the saved file');
 });
 
-test('a deletion is visible on screen but not in the file', async b => {
+test('deleted text vanishes from the page and the file, and comes back with undo', async b => {
   await b.reload();
-  await b.evaluate(makeDoc(`doc.addPage([420, 300]).drawText('DELETEME line', { x: 30, y: 250, size: 14, font: f });`));
+  await b.evaluate(makeDoc(`
+    const p = doc.addPage([420, 300]);
+    p.drawRectangle({ x: 20, y: 236, width: 300, height: 30, color: rgb(0.99, 0.91, 0.85) });   // shading behind the line
+    p.drawLine({ start: { x: 20, y: 244 }, end: { x: 380, y: 244 }, thickness: 1, color: rgb(0, 0, 0) });   // a rule through it
+    p.drawText('DELETEME line', { x: 30, y: 250, size: 14, font: f });
+    p.drawText('KEEP this one', { x: 30, y: 200, size: 14, font: f });`));
   await b.waitFor(settled);
-  await b.evaluate(`KamPdfText.index(0)`);
+  await b.waitFor(`KamContent.cached(0) && KamContent.cached(0).ok`);
   await b.evaluate(`setTool('select')`);
   await b.evaluate(`pdfTextSelect(60, 46)`);
   eq(await b.evaluate(`pdfTextDeleteSelected()`), true, 'the line was deleted');
+  eq(await b.evaluate(`curAnnots().map(a => [a.type, a.text])`), [['textedit', '']], 'recorded as a deletion of the words themselves');
+  await b.waitFor(settled);
+  await b.waitFor(`KamView.canvasSig(0) === KamPatch.sigFor(0)`);
 
-  // On white paper a white patch is invisible, which is how a deletion gets clicked and
-  // undone by accident. On screen it must be marked; in the file it must not be.
+  // The words are taken out of the page, so there is no patch of paper: the shading and the
+  // rule behind them are untouched, on screen and in the file.
+  const b64 = await b.evaluate(exportBase64);
+  const pages = await b.evaluate(textOf(b64));
+  ok(!pages[0].includes('DELETEME'), 'the deleted words are still in the file');
+  ok(pages[0].includes('KEEP this one'), 'the other line was lost');
+  const px = await b.evaluate(comparePages(b64, [26, 36, 140, 56]));
+  eq(px.outside, 0, 'pixels changed away from the deleted words');
+  const shade = await b.evaluate(`(async () => {
+    const s = atob(${JSON.stringify(b64)}); const u = new Uint8Array(s.length);
+    for (let i = 0; i < s.length; i++) u[i] = s.charCodeAt(i);
+    const p = await (await pdfjsLib.getDocument({ data: u }).promise).getPage(1); const vp = p.getViewport({ scale: 2 });
+    const c = document.createElement('canvas'); c.width = vp.width; c.height = vp.height; const g = c.getContext('2d');
+    await p.render({ canvasContext: g, viewport: vp }).promise;
+    const at = (x, y) => Array.from(g.getImageData(x * 2, y * 2, 1, 1).data.slice(0, 3));
+    return { shading: at(100, 40), rule: at(100, 56) };
+  })()`);
+  ok(shade.shading[0] > 240 && shade.shading[2] < 230, `the shading behind the deleted words is gone: ${shade.shading}`);
+  ok(shade.rule[0] < 80, `the rule through the deleted words is gone: ${shade.rule}`);
+  const scr = await b.evaluate(screenVsSaved(b64));
+  ok(scr.differing / scr.total < 0.0002, `the screen and the saved file differ: ${scr.differing} pixels`);
+
+  // listed in Layers, and Ctrl+Z brings the words back
+  ok(/Deleted text/.test(await b.evaluate(`document.getElementById('layerList').textContent`)), 'the deletion is listed in Layers');
+  await b.evaluate(`undo()`);
+  await b.waitFor(`KamView.canvasSig(0) === KamPatch.sigFor(0) && KamPatch.sigFor(0) === ''`);
+  eq(await b.evaluate(`KamPdfText.index(0).then(e => e.runs.map(r => r.text))`), ['DELETEME line', 'KEEP this one'], 'undo brings the words back');
+});
+
+test('text the engine cannot rewrite is still deleted, the older way', async b => {
+  await b.reload();
+  // a font chosen through a graphics state (gs) rather than Tf: pdf.js draws it, but the text
+  // engine does not rewrite it, so deleting falls back to a redaction patch, marked on screen
+  await b.evaluate(`(async () => {
+    const { PDFDocument, StandardFonts, PDFNumber } = PDFLib;
+    const doc = await PDFDocument.create(), f = await doc.embedFont(StandardFonts.Helvetica);
+    const p = doc.addPage([420, 300]);
+    p.drawText('x', { x: -50, y: -50, size: 1, font: f });                 // puts the font in the page resources
+    const gsName = p.node.newExtGState('GSF', doc.context.obj({ Type: 'ExtGState', Font: [f.ref, PDFNumber.of(14)] }));
+    p.pushOperators(PDFLib.pushGraphicsState(), PDFLib.setGraphicsState(gsName), PDFLib.beginText(),
+      PDFLib.moveText(30, 250), PDFLib.showText(f.encodeText('DELETEME line')), PDFLib.endText(), PDFLib.popGraphicsState());
+    const bytes = await doc.save();
+    await openBytes(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength), 'gsfont.pdf');
+    return 1; })()`);
+  await b.waitFor(settled);
+  await b.waitFor(`KamContent.cached(0)`);
+  await b.evaluate(`KamPdfText.index(0)`);
+  await b.evaluate(`setTool('select')`);
+  eq(await b.evaluate(`pdfTextSelect(60, 46)`), true, 'the line can be picked');
+  eq(await b.evaluate(`pdfTextDeleteSelected()`), true, 'the line was deleted');
+  eq(await b.evaluate(`curAnnots().map(a => a.type + (a.redact ? ':redact' : ''))`), ['rect:redact'], 'deleted with a redaction');
+  // On white paper a white patch is invisible, which is how a deletion gets clicked and undone
+  // by accident. On screen it must be marked; in the file it must not be.
   const diff = await b.evaluate(`(async () => {
     const p = await state.pdfjs.getPage(1); const vp = p.getViewport({ scale: 2 });
     const mk = async marks => {
@@ -546,33 +685,247 @@ test('a deletion is visible on screen but not in the file', async b => {
     return differing;
   })()`);
   ok(diff > 200, `a deletion should be clearly marked on screen, only ${diff} pixels differ`);
-
-  // the saved file must show clean paper there, with no hatching baked in
   const b64 = await b.evaluate(exportBase64);
   const pages = await b.evaluate(textOf(b64));
   ok(!pages[0].includes('DELETEME'), 'the deleted words are still in the file');
-  const clean = await b.evaluate(`(async () => {
-    const s = atob(${JSON.stringify(b64)}); const u = new Uint8Array(s.length);
-    for (let i = 0; i < s.length; i++) u[i] = s.charCodeAt(i);
-    const pdf = await pdfjsLib.getDocument({ data: u }).promise;
-    const p = await pdf.getPage(1); const vp = p.getViewport({ scale: 2 });
-    const c = document.createElement('canvas'); c.width = vp.width; c.height = vp.height;
-    const ctx = c.getContext('2d');
-    ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, c.width, c.height);
-    await p.render({ canvasContext: ctx, viewport: vp }).promise;
-    // the strip where the line used to be should be plain paper
-    const d = ctx.getImageData(50, 60, 300, 40).data;
-    let ink = 0; for (let i = 0; i < d.length; i += 4) if (d[i] < 200 || d[i+1] < 200) ink++;
-    return ink;
-  })()`);
-  ok(clean < 40, `the deleted area should be clean paper in the file, found ${clean} marked pixels`);
+});
 
-  // an ordinary click must not reach the deletion, or Delete there would put the words back
-  eq(await b.evaluate(`(() => { const a = hitTest(60, 46); return a ? a.type : 'nothing'; })()`), 'nothing',
-    'a plain click should not select a deletion');
-  eq(await b.evaluate(`!!deletionAt(60, 46)`), true, 'the deletion is still there to be found deliberately');
-  eq(await b.evaluate(`(() => { const a = hitTest(60, 46, null, true); return a ? !!a.redact : false; })()`), true,
-    'Alt+click should still reach the deletion');
+/* ---------- the text engine: editing a PDF's own words in its own fonts ---------- */
+
+// Open a base64 PDF in the app.
+const openBase64 = (b64, name) => `(async () => {
+  const s = atob(${JSON.stringify(b64)}); const u = new Uint8Array(s.length);
+  for (let i = 0; i < s.length; i++) u[i] = s.charCodeAt(i);
+  await openBytes(u.buffer, ${JSON.stringify(name)}); return state.pageIds.length; })()`;
+
+// Edit a phrase the way the mouse does: double-click near its start, retype it, press Enter.
+const editPhrase = (starts, text, page = 0) => `(async () => {
+  await KamContent.analyse(${page});
+  const it = KamContent.current(${page}).find(c => c.text.startsWith(${JSON.stringify(starts)}));
+  if (!it) throw new Error('no phrase starts with ' + ${JSON.stringify(starts)});
+  if (state.cur !== ${page}) KamView.setActive(${page});
+  const b = it.box, t = b.rot * Math.PI / 180, lx = Math.min(b.w / 2, 4), ly = b.h / 2;
+  const x = b.x + lx * Math.cos(t) - ly * Math.sin(t), y = b.y + lx * Math.sin(t) + ly * Math.cos(t);
+  if (!(await pdfTextEditAt(x, y))) throw new Error('could not start editing ' + ${JSON.stringify(starts)});
+  const ta = document.getElementById('phraseInput');
+  ta.value = ${JSON.stringify(text)}; ta.dispatchEvent(new Event('input'));
+  ta.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+  await KamView.whenIdle();
+  return (state.annots[state.pageIds[${page}]] || []).filter(a => a.type === 'textedit').length;
+})()`;
+
+// The boxes (display points) of the phrases starting with these words, before editing.
+const boxesOf = starts => `(async () => {
+  const an = await KamContent.analyse(0);
+  return ${JSON.stringify(starts)}.map(s => { const p = an.phrases.find(p => p.text.startsWith(s)); const b = p.box;
+    return [b.x - 2, b.y - 2, b.x + Math.max(b.w, 400) + 2, b.y + b.h + 2]; });
+})()`;
+
+// Page 1 of a saved PDF against the original page, at 2x, outside a list of boxes.
+const changedOutside = (b64, boxes) => `(async () => {
+  const s = atob(${JSON.stringify(b64)}); const u = new Uint8Array(s.length);
+  for (let i = 0; i < s.length; i++) u[i] = s.charCodeAt(i);
+  const saved = await (await pdfjsLib.getDocument({ data: u }).promise).getPage(1);
+  const orig = await state.pdfjs.getPage(1);
+  const draw = async p => { const vp = p.getViewport({ scale: 2 }); const c = document.createElement('canvas'); c.width = vp.width; c.height = vp.height;
+    const g = c.getContext('2d'); g.fillStyle = '#fff'; g.fillRect(0, 0, c.width, c.height); await p.render({ canvasContext: g, viewport: vp }).promise;
+    return { d: g.getImageData(0, 0, c.width, c.height).data, w: c.width, h: c.height }; };
+  const A = await draw(orig), B = await draw(saved), boxes = ${JSON.stringify(boxes)};
+  let outside = 0;
+  for (let y = 0; y < A.h; y++) for (let x = 0; x < A.w; x++) {
+    const i = (y * A.w + x) * 4;
+    if (Math.abs(A.d[i] - B.d[i]) + Math.abs(A.d[i + 1] - B.d[i + 1]) + Math.abs(A.d[i + 2] - B.d[i + 2]) < 30) continue;
+    if (!boxes.some(([x0, y0, x1, y1]) => x >= x0 * 2 && x <= x1 * 2 && y >= y0 * 2 && y <= y1 * 2)) outside++;
+  }
+  return outside;
+})()`;
+
+const INVOICE_HTML = `<!doctype html><html><head><meta charset="utf-8"><style>
+  @page { size: A4; margin: 18mm; }
+  body { font: 11pt Calibri, Carlito, Arial, sans-serif; color: #111; }
+  h1 { font: bold 22pt Cambria, Caladea, Georgia, serif; color: #1f3864; margin: 0 0 8pt; }
+  .times { font-family: 'Times New Roman', 'Liberation Serif', serif; }
+  .red { color: #c00000; }
+  table { border-collapse: collapse; margin-top: 8pt; } td { border: 0.5pt solid #999; padding: 3pt 8pt; }
+</style></head><body>
+<h1>Quarterly Invoice Summary</h1>
+<p>Invoice number: <b>INV-2024-0117</b> &nbsp; Date: 14 March 2024</p>
+<p>Total due: <span class="red"><b>£1,399.20</b></span> by 30 April 2024.</p>
+<p class="times">Times line: The quick brown fox jumps over the lazy dog.</p>
+<table><tr><td>Item</td><td>Qty</td><td>Price</td></tr><tr><td>Widgets</td><td>12</td><td>£96.00</td></tr></table>
+</body></html>`;
+
+test('a document printed from a browser is edited in its own fonts, and nothing else moves', async b => {
+  const pdf64 = await b.printHtml(INVOICE_HTML);
+  await b.reload();
+  await b.evaluate(openBase64(pdf64, 'printed.pdf'));
+  await b.waitFor(settled);
+  const an = await b.evaluate(`KamContent.analyse(0).then(an => ({ ok: an.ok, reason: an.reason, phrases: an.phrases.map(p => p.text) }))`);
+  ok(an.ok, 'the printed page could not be read: ' + an.reason);
+  ok(an.phrases.includes('Total due: £1,399.20 by 30 April 2024.'), 'a line with a bold red amount is one phrase: ' + JSON.stringify(an.phrases));
+  ok(an.phrases.includes('Widgets') && an.phrases.includes('£96.00'), 'table cells are phrases of their own');
+  const fontsBefore = await b.evaluate(`(async () => { const d = state.doc; const fonts = d.getPage(0).node.Resources().lookup(PDFLib.PDFName.of('Font'));
+    return fonts.keys().map(k => fonts.lookup(k).lookup(PDFLib.PDFName.of('BaseFont')).decodeText().replace(/^[A-Z]{6}[+]/, '')).sort(); })()`);
+  const boxes = await b.evaluate(boxesOf(['Total due', 'Times line', '£96.00']));
+
+  eq(await b.evaluate(editPhrase('Total due', 'Total due: £1,499.20 by 30 April 2024.')), 1, 'first edit recorded');
+  eq(await b.evaluate(editPhrase('Times line', 'Times line: The very quick brown fox jumps over the lazy dog.')), 2, 'second edit recorded');
+  eq(await b.evaluate(editPhrase('£96.00', '')), 3, 'deletion recorded');
+  await b.waitFor(settled);
+
+  const saved = await b.evaluate(exportBase64);
+  const text = (await b.evaluate(textOf(saved)))[0];
+  ok(/Total due: ?£1,499\.20 by 30 April/.test(text), `the new amount reads wrong: ${text}`);
+  ok(!text.includes('1,399.20'), 'the old amount is still in the file');
+  ok(/The very quick brown fox jumps over the lazy dog/.test(text.replace(/\s+/g, ' ')), `the added word reads wrong: ${text}`);
+  ok(!text.includes('96.00') && text.includes('Widgets'), 'the deleted cell is still there, or its row went with it');
+  // every new letter was already in the document's fonts, so no font was added
+  eq(await b.evaluate(fontsOfSaved(saved)), fontsBefore, 'the saved page uses only its original fonts');
+  // nothing moves outside the edited lines: headings, other lines, the table's borders
+  eq(await b.evaluate(changedOutside(saved, boxes)), 0, 'pixels changed outside the edited lines');
+  const scr = await b.evaluate(screenVsSaved(saved));
+  ok(scr.differing / scr.total < 0.0002, `the screen and the saved file differ: ${scr.differing} pixels`);
+  // and a second engine reads the same words
+  const fium = pdfiumText(Buffer.from(saved, 'base64'));
+  if (fium === null) console.log('      (PDFium check skipped: install pypdfium2 to enable it)');
+  else {
+    ok(/Total due: £1,499\.20 by 30 April 2024\./.test(fium), `PDFium reads the amount wrong: ${fium}`);
+    ok(/The very quick brown fox jumps over the lazy dog\./.test(fium), `PDFium reads the line wrong: ${fium}`);
+    ok(!fium.includes('1,399.20') && !fium.includes('96.00'), 'PDFium still finds the old words');
+  }
+});
+
+test('letters the font does not have come from a matching font, and read back correctly', async b => {
+  await b.reload();
+  await b.evaluate(makeDoc(`doc.addPage([420, 200]).drawText('Office: Main Street 12', { x: 30, y: 150, size: 16, font: f });`));
+  await b.waitFor(settled);
+  // Helvetica as PDFs carry it can only write Western European letters: the rest must come from
+  // the bundled font made to Helvetica's measurements
+  eq(await b.evaluate(editPhrase('Office', 'Office: ulica Żółta 12, Kraków')), 1, 'edit recorded');
+  await b.waitFor(settled);
+  const saved = await b.evaluate(exportBase64);
+  const text = (await b.evaluate(textOf(saved)))[0];
+  ok(text.replace(/\s+/g, ' ').includes('Office: ulica Żółta 12, Kraków'), `the new letters read wrong: ${text}`);
+  const fonts = await b.evaluate(fontsOfSaved(saved));
+  ok(fonts.includes('Helvetica'), 'the original font was dropped');
+  ok(fonts.some(f => /LiberationSans/.test(f)), `no matching font was brought in for the new letters: ${fonts}`);
+  const scr = await b.evaluate(screenVsSaved(saved));
+  ok(scr.differing / scr.total < 0.0003, `the screen and the saved file differ: ${scr.differing} pixels`);
+  const fium = pdfiumText(Buffer.from(saved, 'base64'));
+  if (fium !== null) ok(fium.includes('ulica Żółta 12, Kraków'), `PDFium reads the new letters wrong: ${fium}`);
+});
+
+test('a line set with kerning, letter and word spacing keeps its spacing when words are added', async b => {
+  await b.reload();
+  await b.evaluate(makeDoc(`
+    const p = doc.addPage([500, 200]);
+    const name = p.node.newFontDictionary('F', f.ref);
+    const L = PDFLib, T = s => f.encodeText(s);
+    p.pushOperators(L.beginText(), L.setFontAndSize(name, 16), L.setCharacterSpacing(0.5), L.setWordSpacing(2),
+      L.moveText(40, 120), L.PDFOperator.of(L.PDFOperatorNames.ShowTextAdjusted, [doc.context.obj([T('Hello'), 120, T(' brave new'), -40, T(' world')])]),
+      L.endText());`));
+  await b.waitFor(settled);
+  const before = await b.evaluate(`KamContent.analyse(0).then(an => an.phrases.map(p => [p.text, +p.spaceAdv.toFixed(3)]))`);
+  eq(before[0][0], 'Hello brave new world', 'the line is read as one phrase');
+  const boxes = await b.evaluate(boxesOf(['Hello']));
+  eq(await b.evaluate(editPhrase('Hello', 'Hello brave new big world')), 1, 'edit recorded');
+  await b.waitFor(settled);
+  const saved = await b.evaluate(exportBase64);
+  const text = (await b.evaluate(textOf(saved)))[0].replace(/\s+/g, ' ');
+  eq(text, 'Hello brave new big world', 'the words read in order');
+  // "Hello brave new " is untouched, and "world" moved along by exactly the room "big " takes:
+  // three letters and a space with the line's own letter and word spacing
+  const ink = await b.evaluate(`(async () => {
+    const s = atob(${JSON.stringify(saved)}); const u = new Uint8Array(s.length);
+    for (let i = 0; i < s.length; i++) u[i] = s.charCodeAt(i);
+    const edges = async p => { const vp = p.getViewport({ scale: 4 }); const c = document.createElement('canvas'); c.width = vp.width; c.height = vp.height;
+      const g = c.getContext('2d'); g.fillStyle = '#fff'; g.fillRect(0, 0, c.width, c.height); await p.render({ canvasContext: g, viewport: vp }).promise;
+      const d = g.getImageData(0, 0, c.width, c.height).data; let right = 0;
+      for (let y = 0; y < c.height; y++) for (let x = 0; x < c.width; x++) if (d[(y * c.width + x) * 4] < 128 && x > right) right = x;
+      return right / 4; };
+    return { before: await edges(await state.pdfjs.getPage(1)), after: await edges(await (await pdfjsLib.getDocument({ data: u }).promise).getPage(1)) };
+  })()`);
+  const f16 = await b.evaluate(`(async () => { const d = await PDFLib.PDFDocument.create(); const f = await d.embedFont(PDFLib.StandardFonts.Helvetica); return f.widthOfTextAtSize('big', 16) + f.widthOfTextAtSize(' ', 16); })()`);
+  const want = f16 + 4 * 0.5 + 2;          // 'b' 'i' 'g' ' ' each get 0.5 of letter spacing, the space 2 of word spacing
+  near(ink.after - ink.before, want, 0.35, 'the end of the line moved by the width of the added word');
+  const px = await b.evaluate(comparePages(saved, [40 + 118, 60, 480, 90]));
+  eq(px.outside, 0, '"Hello brave new" should not have moved at all');
+});
+
+test('text inside a form object on the page can be edited too', async b => {
+  await b.reload();
+  await b.evaluate(`(async () => {
+    const { PDFDocument, StandardFonts } = PDFLib;
+    const src = await PDFDocument.create(), sf = await src.embedFont(StandardFonts.Helvetica);
+    src.addPage([400, 200]).drawText('Inside a form object', { x: 30, y: 150, size: 16, font: sf });
+    const doc = await PDFDocument.create();
+    const [emb] = await doc.embedPdf(await src.save());
+    const p = doc.addPage([400, 200]); p.drawPage(emb, { x: 0, y: 0 });
+    p.drawPage(emb, { x: 0, y: -80 });                  // drawn twice: only the one edited may change
+    const b = await doc.save();
+    await openBytes(b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength), 'form.pdf'); return 1; })()`);
+  await b.waitFor(settled);
+  eq(await b.evaluate(`KamContent.analyse(0).then(an => an.ok && an.phrases.map(p => p.text))`), ['Inside a form object', 'Inside a form object'], 'both copies are read');
+  eq(await b.evaluate(editPhrase('Inside', 'Within a form object')), 1, 'edit recorded');
+  await b.waitFor(settled);
+  const saved = await b.evaluate(exportBase64);
+  const text = (await b.evaluate(textOf(saved)))[0];
+  ok(text.includes('Within a form object') && text.includes('Inside a form object'), `one copy should change and the other stay: ${text}`);
+  const scr = await b.evaluate(screenVsSaved(saved));
+  ok(scr.differing / scr.total < 0.0002, `the screen and the saved file differ: ${scr.differing} pixels`);
+});
+
+test('text on a turned page is edited where it is', async b => {
+  await b.reload();
+  await b.evaluate(makeDoc(`
+    const p = doc.addPage([420, 300]);
+    p.drawText('Sideways heading', { x: 30, y: 250, size: 18, font: fb });
+    p.setRotation(degrees(90));`));
+  await b.waitFor(settled);
+  eq(await b.evaluate(`KamContent.analyse(0).then(an => an.phrases.map(p => [p.text, Math.round(p.angle)]))`), [['Sideways heading', 90]], 'read along the turned line');
+  eq(await b.evaluate(editPhrase('Sideways', 'Sideways title')), 1, 'edit recorded');
+  await b.waitFor(settled);
+  const saved = await b.evaluate(exportBase64);
+  ok((await b.evaluate(textOf(saved)))[0].includes('Sideways title'), 'the edit is in the file');
+  const scr = await b.evaluate(screenVsSaved(saved));
+  ok(scr.differing / scr.total < 0.0002, `the screen and the saved file differ: ${scr.differing} pixels`);
+});
+
+test('text edits can be hidden, retyped, taken back, and survive the window closing', async b => {
+  await b.reload();
+  await b.evaluate(makeDoc(`doc.addPage([420, 300]).drawText('Account holder: Jane Smith', { x: 30, y: 250, size: 14, font: f });`));
+  await b.waitFor(settled);
+  eq(await b.evaluate(editPhrase('Account', 'Account holder: Janet Smith')), 1, 'edit recorded');
+  const read = `KamPdfText.index(0).then(e => e.runs.map(r => r.text).join('|'))`;
+  await b.waitFor(`KamView.canvasSig(0) === KamPatch.sigFor(0)`);
+  eq(await b.evaluate(read), 'Account holder: Janet Smith', 'the page reads the new words');
+
+  // hide it in Layers: the original words come back; show it again
+  await b.evaluate(`document.querySelector('#layerList .layer-btn[data-act="eye"]').click(); 1`);
+  await b.waitFor(`KamView.canvasSig(0) === KamPatch.sigFor(0)`);
+  eq(await b.evaluate(read), 'Account holder: Jane Smith', 'hiding an edit shows the original');
+  await b.evaluate(`document.querySelector('#layerList .layer-btn[data-act="eye"]').click(); 1`);
+  await b.waitFor(`KamView.canvasSig(0) === KamPatch.sigFor(0)`);
+  eq(await b.evaluate(read), 'Account holder: Janet Smith', 'showing it again brings the edit back');
+
+  // retyping an edited line changes the same edit, and typing the original back removes it
+  eq(await b.evaluate(editPhrase('Account', 'Account holder: Janet Smithson')), 1, 'still one edit');
+  eq(await b.evaluate(`curAnnots()[0].text`), 'Account holder: Janet Smithson', 'the edit was updated');
+
+  // the working copy keeps it
+  await b.evaluate(`document.getElementById('autosaveOn').checked = true; 1`);
+  await b.evaluate(`KamDraft.clear()`);
+  await b.evaluate(`noteChange()`);
+  await b.waitFor(`KamDraft.get().then(d => !!d && d.annots && d.annots[0] && d.annots[0].length === 1)`, 20000);
+  await b.reload();
+  await b.waitFor(`!document.getElementById('btnRestoreEmpty').hidden`, 10000);
+  await b.evaluate(`document.getElementById('btnRestoreEmpty').click()`);
+  await b.waitFor(`!!state.doc && !state.renderTask && curAnnots().length === 1`, 20000);
+  await b.waitFor(`KamView.canvasSig(0) === KamPatch.sigFor(0) && KamPatch.sigFor(0) !== ''`);
+  eq(await b.evaluate(read), 'Account holder: Janet Smithson', 'the edit came back with the working copy');
+  await b.evaluate(`document.getElementById('btnForget').click()`);
+
+  eq(await b.evaluate(editPhrase('Account', 'Account holder: Jane Smith')), 0, 'typing the original back removes the edit');
 });
 
 test('layers panel lists, hides, reorders and deletes marks', async b => {
@@ -1424,6 +1777,7 @@ test('text inside a PDF can never run as code in the app', async b => {
   await b.evaluate(makeDoc(`doc.addPage([595, 842]).drawText('<img src=x onerror=__p=1>', { x: 50, y: 700, size: 18, font: f });`));
   await b.waitFor(settled);
   await b.evaluate(`window.__p = 0; KamPdfText.index(0)`);
+  await b.evaluate(`KamContent.analyse(0).then(() => 1)`);
   // the ordinary way to remove a line: click it, press Delete, then look at the Layers tab
   await b.evaluate(`(() => { const r = KamPdfText.runsOf(0).find(r => r.text.includes('onerror'));
     pdfTextSelect(r.x + 5, r.y + r.h / 2); pdfTextDeleteSelected();
@@ -1561,6 +1915,34 @@ print(sum(1 for p in img.getdata() if p < 160))
     if (r.status === 0) {
       const out = (r.stdout || '').trim();
       return out === 'SKIP' ? null : parseInt(out, 10);
+    }
+  }
+  return null;
+}
+
+/* All the text PDFium reads from a PDF, pages joined by newlines. null when PDFium is missing. */
+function pdfiumText(buf) {
+  const tmp = path.join(os.tmpdir(), 'kam-pdfium-text.pdf');
+  fs.writeFileSync(tmp, buf);
+  const script = `
+import sys
+try:
+    import pypdfium2 as pdfium
+except Exception:
+    print("SKIP"); sys.exit(0)
+d = pdfium.PdfDocument(sys.argv[1])
+out = []
+for i in range(len(d)):
+    out.append(d[i].get_textpage().get_text_range())
+sys.stdout.buffer.write(("\\n".join(out)).encode("utf-8"))
+`;
+  const sp = path.join(os.tmpdir(), 'kam-pdfium-text.py');
+  fs.writeFileSync(sp, script);
+  for (const py of ['python', 'python3']) {
+    const r = spawnSync(py, [sp, tmp], { encoding: 'utf8' });
+    if (r.status === 0) {
+      const out = (r.stdout || '');
+      return out.trim() === 'SKIP' ? null : out.replace(/\r\n?/g, '\n');
     }
   }
   return null;

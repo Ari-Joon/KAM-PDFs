@@ -146,6 +146,13 @@ async function newBlank() {
   await openBytes(bytes, 'untitled.pdf');
 }
 
+/* One pdf.js worker for every document: the one being edited, and the one-page copies with
+   text edits applied. Starting a worker per document loaded all of pdf.js again each time. */
+function sharedPdfWorker() {
+  if (!sharedPdfWorker.w || sharedPdfWorker.w.destroyed) sharedPdfWorker.w = new pdfjsLib.PDFWorker();
+  return sharedPdfWorker.w;
+}
+
 // Serialize the working document and reload it into pdf.js so the view matches.
 async function rebuild() {
   const bytes = await state.doc.save();
@@ -155,9 +162,12 @@ async function rebuild() {
   // them fail with "Cannot read properties of null".
   const old = state.pdfjs;
   if (old) setTimeout(() => { try { old.destroy(); } catch (e) { } }, 15000);
-  state.pdfjs = await pdfjsLib.getDocument({ data: bytes.slice() }).promise;
+  // fontExtraProperties keeps each font's program and character maps, which the text engine
+  // (content.js) needs to edit text in the document's own fonts
+  state.pdfjs = await pdfjsLib.getDocument({ data: bytes.slice(), fontExtraProperties: true, worker: sharedPdfWorker() }).promise;
   if (state.cur >= state.pageIds.length) state.cur = Math.max(0, state.pageIds.length - 1);
   state.selected = null;
+  if (typeof KamContent !== 'undefined') KamContent.reset();
   if (typeof KamPatch !== 'undefined') KamPatch.reset();
   await KamView.load();
   renderThumbs();

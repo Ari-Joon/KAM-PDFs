@@ -60,7 +60,8 @@ function arrowHead(a) {
 function drawAnnots(ctx, pageId, s, selected, opts) {
   const spell = !opts || opts.spell !== false;
   const marks = !opts || opts.marks !== false;
-  for (const a of (state.annots[pageId] || [])) { if (!a._editing && !a.hidden) drawAnnot(ctx, a, s, spell, marks); }
+  // (edits to the PDF's own text are part of the page picture itself: see content.js)
+  for (const a of (state.annots[pageId] || [])) { if (!a._editing && !a.hidden && a.type !== 'textedit') drawAnnot(ctx, a, s, spell, marks); }
   if (selected) drawSelection(ctx, selected, s);
 }
 /* A deletion is a white patch, which on white paper is invisible: you cannot tell the area
@@ -198,7 +199,8 @@ function hitTest(mx, my, wanted, includeDeletions) {
   const list = curAnnots();
   for (let i = list.length - 1; i >= 0; i--) {
     const a = list[i];
-    if (a.hidden || (wanted && a.type !== wanted)) continue;
+    // edited PDF text is reached as text (pdftext-ui.js), not as a mark to move about
+    if (a.hidden || a.type === 'textedit' || (wanted && a.type !== wanted)) continue;
     if (a.redact && !includeDeletions) continue;
     if (hitAnnot(a, mx, my)) return a;
   }
@@ -318,6 +320,14 @@ pagesEl.addEventListener('pointerdown', e => {
   if (!state.pageIds.length || e.button !== 0 || e.target === ed) return;
   const pi = pageOfEvent(e); if (pi < 0) return;
   e.preventDefault(); // keep focus from jumping away from the text editor
+  // retyping a line of the PDF's text: clicks on it move the caret; anywhere else finishes it
+  if (KamEdit.active()) {
+    if (pi === state.cur) {
+      const [x, y] = evtPt(e);
+      if (KamEdit.pointerDown(pi, x, y, e)) { drag = { mode: 'phrase' }; const o = ov(); if (o) o.setPointerCapture(e.pointerId); return; }
+    }
+    KamEdit.commit();
+  }
   if (editing) { commitTextEdit(); if (state.tool === 'text') return; }
   if (pi !== state.cur) KamView.setActive(pi);       // clicking a page makes it the one you work on
   const [x, y] = evtPt(e); const t = state.tool;
@@ -365,6 +375,7 @@ pagesEl.addEventListener('pointermove', e => {
     return;
   }
   const [x, y] = evtPt(e); const a = drag.a;
+  if (drag.mode === 'phrase') { KamEdit.pointerMove(x, y); return; }
   if (drag.mode === 'draw') { const l = a.pts[a.pts.length - 1]; if (Math.hypot(x - l[0], y - l[1]) > 0.7) a.pts.push([x, y]); }
   else if (drag.mode === 'line') {
     let [ex, ey] = [x, y];
@@ -399,6 +410,7 @@ pagesEl.addEventListener('pointermove', e => {
 });
 function endDrag(e) {
   if (!drag) return;
+  if (drag.mode === 'phrase') { drag = null; KamEdit.pointerUp(); return; }
   if (drag.mode === 'seltext') {
     const moved = drag.moved, start = drag.start; drag = null;
     if (moved) pdfTextDragEnd();
@@ -427,6 +439,7 @@ pagesEl.addEventListener('pointercancel', endDrag);
 pagesEl.addEventListener('dblclick', async e => {
   if (state.tool !== 'select' || e.target === ed || pageOfEvent(e) !== state.cur) return;
   const [x, y] = evtPt(e);
+  if (KamEdit.active() && KamEdit.inside(state.cur, x, y)) { KamEdit.selectWordAt(x, y); return; }
   const mine = hitTest(x, y, 'text');
   if (mine) { startTextEdit(mine); return; }
   if (!coverAt(x, y) && typeof pdfTextEditAt === 'function' && await pdfTextEditAt(x, y)) return;
@@ -464,6 +477,7 @@ ed.addEventListener('input', () => { if (!editing) return; editing.text = ed.val
 ed.addEventListener('keydown', e => { if (e.key === 'Escape') { e.preventDefault(); commitTextEdit(); } e.stopPropagation(); });
 ed.addEventListener('blur', () => commitTextEdit());
 function commitTextEdit() {
+  if (typeof KamEdit !== 'undefined') KamEdit.commit();       // a line of the PDF's own text
   if (!editing) return;
   const a = editing; editing = null; delete a._editing;
   a.text = ed.value; ed.style.display = 'none';

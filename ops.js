@@ -248,7 +248,7 @@ $('#btnExtractText').onclick = async () => {
   if (!state.doc) return toast('Open a PDF first');
   busy(true);
   try {
-    const page = await state.pdfjs.getPage(state.cur + 1);
+    const page = await KamView.pdfPage(state.cur);      // the words as they are now, edits included
     const tc = await page.getTextContent();
     let text = '';
     for (const it of tc.items) { text += it.str; if (it.hasEOL) text += '\n'; }
@@ -359,7 +359,7 @@ function annotBox(a) {
    When that happens the fields have to be flattened into the page first. */
 async function annotsCoverAFormField() {
   for (let i = 0; i < state.pageIds.length; i++) {
-    const list = (state.annots[state.pageIds[i]] || []).filter(a => !a.hidden && !(a.type === 'text' && !a.text.trim()));
+    const list = (state.annots[state.pageIds[i]] || []).filter(a => !a.hidden && a.type !== 'textedit' && !(a.type === 'text' && !a.text.trim()));
     if (!list.length) continue;
     let page, widgets;
     try {
@@ -414,7 +414,7 @@ function flattenLeftoverWidgets(doc) {
    the page is rebuilt from this image, so the words underneath are gone from the file
    rather than merely hidden. */
 async function rasterisePage(i, dpi = 180) {
-  const page = await state.pdfjs.getPage(i + 1);
+  const page = await KamView.pdfPage(i);             // with any edits to its own text
   const base = page.getViewport({ scale: 1 });
   const scale = dpi / 72;
   const vp = page.getViewport({ scale });
@@ -435,6 +435,20 @@ async function rasterisePage(i, dpi = 180) {
 
 async function burnedDoc() {
   const doc = await PDFDocument.load(state.bytes, { ignoreEncryption: true, updateMetadata: false });
+  // Text edited in place goes into the pages' own content first, before forms are flattened or
+  // anything of ours is drawn on top: the words are rewritten where they are, in their own
+  // font (content.js).
+  let skipped = 0, applied = 0;
+  for (let i = 0; i < state.pageIds.length; i++) {
+    const eds = (state.annots[state.pageIds[i]] || []).filter(a => a.type === 'textedit' && !a.hidden);
+    if (!eds.length) continue;
+    const an = await KamContent.analyse(i);
+    const done = an.ok ? await KamContent.applyEdits(doc, i, an, eds) : 0;
+    skipped += eds.length - done; applied += done;
+  }
+  if (skipped) toast(`${skipped} text edit${skipped === 1 ? '' : 's'} could not be written, because the page has changed underneath ${skipped === 1 ? 'it' : 'them'}.`, 6000);
+  // the pages' old content, with the words that were changed or deleted, must not stay in the file
+  if (applied) KamContent.pruneUnreachable(doc);
   const redacted = [];
   for (let i = 0; i < state.pageIds.length; i++)
     if ((state.annots[state.pageIds[i]] || []).some(a => a.redact && !a.hidden)) redacted.push(i);
@@ -506,7 +520,7 @@ async function burnedDoc() {
 
   for (let i = 0; i < state.pageIds.length; i++) {
     if (redacted.includes(i)) continue;                 // rebuilt from a bitmap further down
-    const list = (state.annots[state.pageIds[i]] || []).filter(a => !a.hidden && !(a.type === 'text' && !a.text.trim()));
+    const list = (state.annots[state.pageIds[i]] || []).filter(a => !a.hidden && a.type !== 'textedit' && !(a.type === 'text' && !a.text.trim()));
     const ocrWords = (typeof ocrWordsFor === 'function' ? ocrWordsFor(i) : []) || [];
     if (!list.length && !ocrWords.length) continue;
     const page = doc.getPage(i);
@@ -629,7 +643,7 @@ $('#btnPrint').onclick = async () => {
 $('#btnPng').onclick = async () => {
   if (!state.doc) return toast('Open a PDF first');
   commitTextEdit();
-  const page = await state.pdfjs.getPage(state.cur + 1);
+  const page = await KamView.pdfPage(state.cur);
   const vp = page.getViewport({ scale: 2 });
   const c = document.createElement('canvas'); c.width = vp.width; c.height = vp.height;
   const ctx = c.getContext('2d');

@@ -6,7 +6,12 @@
   const listEl = $('#layerList');
   let signature = '';
 
+  const quote = (t, n) => { t = (t || '').replace(/\s+/g, ' ').trim(); return `"${t.slice(0, n)}${t.length > n ? '…' : ''}"`; };
   function describe(a) {
+    if (a.type === 'textedit') {
+      const was = a.src ? a.src.text : '';
+      return a.text ? { kind: 'Edited', detail: `${quote(was, 16)} → ${quote(a.text, 16)}` } : { kind: 'Deleted text', detail: quote(was, 26) };
+    }
     if (a.type === 'text') {
       const t = (a.text || '').replace(/\s+/g, ' ').trim();
       return { kind: 'Text', detail: t ? `"${t.slice(0, 28)}${t.length > 28 ? '…' : ''}"` : '(empty)' };
@@ -24,7 +29,7 @@
   }
 
   const swatch = a => {
-    const c = a.redact ? '#000000' : a.type === 'text' ? a.color : (a.fill || a.stroke || a.color || '#888888');
+    const c = a.type === 'textedit' ? '#3b82f6' : a.redact ? '#000000' : a.type === 'text' ? a.color : (a.fill || a.stroke || a.color || '#888888');
     return /^#[0-9a-f]{3,8}$/i.test(c || '') ? c : '#888888';
   };
   // the same drawn icons as the rest of the app, rather than glyphs that render differently everywhere
@@ -33,7 +38,7 @@
   function sig() {
     if (!state.pageIds.length) return 'empty';
     const list = state.annots[state.pageIds[state.cur]] || [];
-    return state.cur + '|' + list.map(a => `${a.id}:${a.hidden ? 'h' : 'v'}:${(a.text || '').length}`).join(',')
+    return state.cur + '|' + list.map(a => `${a.id}:${a.hidden ? 'h' : 'v'}:${(a.text || '').length}:${(a.text || '').slice(0, 40)}`).join(',')
       + '|' + (state.selected ? state.selected.id : '-');
   }
 
@@ -82,14 +87,18 @@
         b.title = label; b.setAttribute('aria-label', label); b.disabled = !!disabled; b.innerHTML = icon(ic);
         row.appendChild(b);
       };
-      btn('eye', a.hidden ? 'Show' : 'Hide', a.hidden ? 'eye-off' : 'eye');
-      btn('up', 'Bring forward', 'up', i === list.length - 1);
-      btn('down', 'Send back', 'down', i === 0);
-      btn('del', 'Delete', 'trash');
+      // An edit to the PDF's own text is part of the page, not a layer on it: it has no place
+      // in the stacking order, and removing it brings the original words back.
+      const inPage = a.type === 'textedit';
+      btn('eye', a.hidden ? (inPage ? 'Show the edit' : 'Show') : (inPage ? 'Show the original words' : 'Hide'), a.hidden ? 'eye-off' : 'eye');
+      btn('up', 'Bring forward', 'up', inPage || i === list.length - 1);
+      btn('down', 'Send back', 'down', inPage || i === 0);
+      btn('del', inPage ? 'Undo this edit (the original words come back)' : 'Delete', 'trash');
       row.onclick = e => {
         const act = e.target.dataset && e.target.dataset.act;
         if (!act) {                                   // clicking the row selects it on the page
           commitTextEdit();
+          if (inPage) { if (!a.hidden) KamView.reveal(state.cur, a.x + a.w / 2, a.y + a.h / 2); render(true); return; }
           state.selected = a.hidden ? null : a;
           if (typeof pdfTextClearPick === 'function') pdfTextClearPick();
           if (state.tool !== 'select') setTool('select');
@@ -99,7 +108,10 @@
         e.stopPropagation();
         pushAnnotUndo(state.pageIds[state.cur]);
         if (act === 'eye') { a.hidden = !a.hidden; if (a.hidden && state.selected === a) state.selected = null; }
-        else if (act === 'del') { list.splice(i, 1); if (state.selected === a) state.selected = null; }
+        else if (act === 'del') {
+          list.splice(i, 1); if (state.selected === a) state.selected = null;
+          if (inPage) toast('Edit undone: the original words are back. Ctrl+Z to redo it.', 4500);
+        }
         else {
           const j = act === 'up' ? i + 1 : i - 1;
           if (j < 0 || j >= list.length) return;
@@ -115,7 +127,8 @@
   $('#btnLayersClear').onclick = () => {
     const list = state.pageIds.length ? (state.annots[state.pageIds[state.cur]] || []) : [];
     if (!list.length) return;
-    if (!confirm(`Remove all ${list.length} of your marks from this page? The page itself is untouched.`)) return;
+    const edits = list.filter(a => a.type === 'textedit').length;
+    if (!confirm(`Remove all ${list.length} of your changes to this page?` + (edits ? ` Text you edited goes back to how it was.` : ' The page itself is untouched.'))) return;
     commitTextEdit();
     pushAnnotUndo(state.pageIds[state.cur]);
     list.length = 0; state.selected = null;

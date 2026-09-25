@@ -139,9 +139,13 @@ const KamView = (() => {
     if (typeof KamPatch !== 'undefined') { const p = await KamPatch.pageFor(i); if (p) return p; }
     return state.pdfjs.getPage(i + 1);
   }
+  const sigOf = i => (typeof KamPatch !== 'undefined' ? KamPatch.sigFor(i) : '');
   async function drawPage(i, gen) {
     const pdf = state.pdfjs;
-    const page = await pdfPage(i);
+    const sig = sigOf(i);                      // the text edits this picture is drawn with
+    let page = null, patchFailed = false;
+    if (sig) { page = await KamPatch.pageFor(i).catch(() => null); patchFailed = !page; }
+    if (!page) page = await state.pdfjs.getPage(i + 1);
     if (gen !== generation || pdf !== state.pdfjs) return;
     const base = page.getViewport({ scale: 1 });
     if (Math.abs(base.width - sizes[i].w) > 0.5 || Math.abs(base.height - sizes[i].h) > 0.5) {
@@ -164,8 +168,13 @@ const KamView = (() => {
     if (d.canvas.id) off.id = d.canvas.id;
     d.canvas.replaceWith(off); d.canvas = off;
     d.ov.width = off.width; d.ov.height = off.height;
-    d.scale = scale; d.zoom = state.zoom; d.stale = false;
+    const textChanged = d.sig !== undefined && d.sig !== sig;
+    d.scale = scale; d.zoom = state.zoom; d.stale = false; d.sig = sig; d.patchFailed = patchFailed;
     drawPageOverlay(i);
+    if (textChanged) document.dispatchEvent(new CustomEvent('kam:textchanged', { detail: i }));
+    // Read the text of the page you are on straight away (it takes a few milliseconds once the
+    // page is drawn), so the first click on a word already knows exactly what it is.
+    if (i === state.cur && typeof KamContent !== 'undefined') setTimeout(() => { if (i < state.pageIds.length) KamContent.analyse(i).catch(() => null); }, 30);
     if (i === state.cur && typeof positionTextEditor === 'function') positionTextEditor();
   }
 
@@ -319,6 +328,8 @@ const KamView = (() => {
   /* ---------- overlays ---------- */
   function drawPageOverlay(i) {
     const d = drawn.get(i); if (!d || !d.ov.width) return;
+    // text edited, deleted, undone or hidden since this picture was drawn: draw it again
+    if (d.zoom && !d.stale && (d.sig || '') !== sigOf(i)) { d.stale = true; schedule(); }
     const ctx = d.ov.getContext('2d');
     ctx.clearRect(0, 0, d.ov.width, d.ov.height);
     const s = d.ov.width / sizes[i].w;
@@ -354,7 +365,7 @@ const KamView = (() => {
     }
     pumpThumbs();
   }, { root: thumbsBox, rootMargin: '400px 0px' });
-  function thumbKey(i) { return state.pageIds[i] + ':' + state.doc.getPage(i).getRotation().angle; }
+  function thumbKey(i) { return state.pageIds[i] + ':' + state.doc.getPage(i).getRotation().angle + ':' + sigOf(i); }
   async function pageBitmap(i) {
     const key = thumbKey(i);
     let bmp = state.thumbCache.get(key);
@@ -433,6 +444,9 @@ const KamView = (() => {
     drawOverlays, drawPageOverlay, scaleOf, buildThumbs, refreshThumb, pdfPage,
     size: i => sizes[i], pageEl: i => els[i], get count() { return els.length; },
     isDrawn: i => drawn.has(i) && !!drawn.get(i).zoom,
+    // the edits the page picture shows ('' if it could not be drawn with them: the overlay then
+    // draws them instead)
+    canvasSig: i => { const d = drawn.get(i); return d && d.zoom ? (d.patchFailed ? '' : (d.sig || '')) : undefined; },
     thumbsIdle: () => !thumbRunning && !thumbQueue.size,
   };
 })();

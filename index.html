@@ -173,6 +173,9 @@ body.no-doc #pages{display:none}
 /* High-contrast cursors (black with white outline) so they stay visible on any page */
 #pages[data-cursor="text"] canvas.ov{cursor:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='24' height='24'><g fill='none' stroke='white' stroke-width='4.5' stroke-linecap='round'><path d='M8 3h8M12 3v18M8 21h8'/></g><g fill='none' stroke='black' stroke-width='2' stroke-linecap='round'><path d='M8 3h8M12 3v18M8 21h8'/></g></svg>") 12 12, text}
 #pages[data-cursor="cross"] canvas.ov{cursor:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='24' height='24'><g stroke='white' stroke-width='4.5' stroke-linecap='round'><path d='M12 2v20M2 12h20'/></g><g stroke='black' stroke-width='2' stroke-linecap='round'><path d='M12 2v20M2 12h20'/></g><circle cx='12' cy='12' r='2.5' fill='%23f5b400'/></svg>") 12 12, crosshair}
+/* the hidden box that takes the typing when a line of the PDF's own text is edited (textedit.js);
+   what you see is drawn on the page itself, in the document's font */
+#phraseInput{position:absolute;z-index:3;opacity:0;pointer-events:none;resize:none;overflow:hidden;border:0;padding:0;margin:0;width:40px;min-height:6px;background:transparent;color:transparent;caret-color:transparent;white-space:pre;line-height:1;transform-origin:0 0}
 #textEditor{position:absolute;z-index:3;display:none;background:rgba(255,255,255,.85);border:1px dashed var(--accent);padding:0;margin:0;resize:none;overflow:hidden;color:#000;outline:none;line-height:1.2;min-width:30px;white-space:pre;overflow-wrap:break-word;word-break:break-word;border-radius:0;transform-origin:0 0;caret-color:#1d4ed8;box-shadow:0 0 0 1px rgba(255,255,255,.9),0 0 0 2px rgba(245,180,0,.6)}
 #pager{container-type:inline-size;display:grid;grid-template-columns:minmax(0,1fr) auto minmax(max-content,1fr);align-items:center;gap:12px;padding:5px 10px;background:var(--panel);border-top:1px solid var(--border);flex:none;order:5}
 #pager input{width:54px;text-align:center}
@@ -678,6 +681,9 @@ details.tip>div{padding:0 2px 11px;line-height:1.55}
 <script src="annot.js"></script>
 <script src="ops.js"></script>
 <script src="viewer.js"></script>
+<script src="fonts.js"></script>
+<script src="content.js"></script>
+<script src="textedit.js"></script>
 <script src="lib/peerjs.min.js"></script>
 <script src="lib/qrcode.min.js"></script>
 <script src="scan-core.js"></script>
