@@ -1466,6 +1466,36 @@ test('links in the PDF work with Ctrl+click, and bookmarks take you where they s
   near(at, 842 - 410, 15, 'a bookmark to part of a page brings that part to the top');
 });
 
+test('on a touch screen, tapping a link offers a button that opens it', async b => {
+  await b.emulate({ width: 390, height: 844 });
+  try {
+    await b.reload();
+    await b.evaluate(linkedDoc);
+    await b.waitFor(settled);
+    const at = (x, y) => b.evaluate(`(() => { const rc = document.getElementById('overlay').getBoundingClientRect(), z = state.zoom;
+      return [rc.left + ${x} * z, rc.top + ${y} * z]; })()`);
+    const tap = async ([x, y]) => { await b.touch('touchStart', [[x, y]]); await sleep(30); await b.touch('touchEnd', []); await sleep(250); };
+    // a tap on the link to the appendix: nothing jumps, a button says where it goes
+    await tap(await at(114, 842 - 664));
+    await b.waitFor(`!!document.getElementById('linkChip') && !document.getElementById('linkChip').hidden`, 3000);
+    eq(await b.evaluate(`state.cur`), 0, 'the tap alone did not leave the page');
+    eq(await b.evaluate(`document.getElementById('linkChip').textContent`), 'Open another place in this document', 'the button says where the link goes');
+    const r = await b.evaluate(`(() => { const r = document.getElementById('linkChip').getBoundingClientRect(); return [r.left + r.width / 2, r.top + r.height / 2, r.right <= innerWidth && r.left >= 0]; })()`);
+    ok(r[2], 'the button is on screen');
+    await tap([r[0], r[1]]);
+    await b.waitFor(`state.cur === 2`, 5000);
+    eq(await b.evaluate(`document.getElementById('linkChip').hidden`), true, 'and it goes away once used');
+    // a tap somewhere with no link puts the button away
+    await b.evaluate(`KamView.goTo(0)`);
+    await b.waitFor(settled);
+    await tap(await at(114, 842 - 704));
+    await b.waitFor(`!document.getElementById('linkChip').hidden`, 3000);
+    eq(await b.evaluate(`document.getElementById('linkChip').textContent`), 'Open https://example.com/', 'a web link says its address');
+    await tap(await at(300, 300));
+    eq(await b.evaluate(`document.getElementById('linkChip').hidden`), true, 'no button where there is no link');
+  } finally { await b.emulate(null); }
+});
+
 test('bookmarks can be added, renamed and removed, and are saved with the file', async b => {
   await b.reload();
   await b.evaluate(linkedDoc);

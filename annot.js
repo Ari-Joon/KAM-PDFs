@@ -361,6 +361,7 @@ pagesEl.addEventListener('pointerdown', e => {
     if (state.selected && hitHandle(state.selected, x, y)) { pushAnnotUndo(curPageId()); drag = { mode: 'resize', a: state.selected, orig: { ...state.selected } }; return; }
     const a = hitTest(x, y, null, e.altKey);
     state.selected = a; updateProps();
+    if (typeof KamLinks !== 'undefined') KamLinks.offer(!a && e.pointerType !== 'mouse' ? pi : -1, x, y, e.clientX, e.clientY);
     if (!a && deletionAt(x, y)) toast('This area was deleted. Alt+click it, or use the Layers tab, to bring it back.', 4500);
     if (a) {
       if (typeof pdfTextClearPick === 'function') pdfTextClearPick();

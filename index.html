@@ -262,6 +262,8 @@ body.no-doc #pages{display:none}
 .spell-none{color:#22c55e;padding:10px 2px}
 
 #toast{position:fixed;bottom:50px;left:50%;transform:translateX(-50%);background:var(--panel);color:var(--text);border:1px solid var(--border);padding:8px 14px;border-radius:8px;display:none;z-index:70;box-shadow:0 2px 10px rgba(0,0,0,.35);max-width:80vw;text-align:center}
+#linkChip{position:fixed;z-index:65;max-width:min(80vw,420px);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:block;background:var(--accent);color:var(--accent-text);border:0;border-radius:18px;padding:9px 16px;font-weight:600;box-shadow:var(--shadow)}
+#linkChip[hidden]{display:none}
 #busy{position:fixed;inset:0;background:rgba(0,0,0,.45);color:#fff;display:none;align-items:center;justify-content:center;z-index:80;font-size:16px}
 #busy.show{display:flex}
 kbd{background:var(--kbd);border:1px solid var(--border);border-radius:4px;padding:0 4px;font-size:11px}

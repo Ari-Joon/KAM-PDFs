@@ -1,7 +1,8 @@
 /* KAM PDFs - links and bookmarks.
  *
  * A PDF's links, to a web page or to another place in the document, work here: hold Ctrl and
- * click one (a plain click still selects and edits, as everywhere else in the app). Its bookmarks,
+ * click one (a plain click still selects and edits, as everywhere else in the app), or on a touch
+ * screen tap it and then the button that appears. Its bookmarks,
  * the outline long documents carry, are listed beside the pages: click one to go there. They can
  * be added, renamed and removed too, and are saved with the file.
  */
@@ -78,6 +79,34 @@ const KamLinks = (() => {
     const l = x === null ? null : linkAt(i, x, y);
     if (l !== hovered || i !== hoveredPage) { hovered = l; hoveredPage = i; drawOverlay(); }
     return l ? `Ctrl+click to open ${where(l)}` : null;
+  }
+  // A touch screen has no Ctrl to hold: tapping a link offers a button that opens it, so a tap
+  // meant to pick or edit the text there still does only that.
+  let chip = null, chipTimer = 0;
+  function hideOffer() { clearTimeout(chipTimer); if (chip) chip.hidden = true; }
+  async function offer(i, x, y, cx, cy) {
+    let l = null;
+    if (i >= 0 && state.pdfjs && i < state.pageIds.length) {
+      try { await linksOf(i); } catch (e) { }
+      l = linkAt(i, x, y);
+    }
+    if (!l) { hideOffer(); return false; }
+    if (!chip) {
+      chip = document.createElement('button');
+      chip.id = 'linkChip'; chip.type = 'button';
+      chip.addEventListener('pointerdown', e => e.stopPropagation());
+      document.body.appendChild(chip);
+      const vp = document.getElementById('viewport');
+      if (vp) vp.addEventListener('scroll', hideOffer, { passive: true });
+    }
+    chip.textContent = `Open ${where(l)}`;
+    chip.onclick = () => { hideOffer(); follow(l); };
+    chip.hidden = false;
+    const r = chip.getBoundingClientRect();
+    chip.style.left = Math.max(8, Math.min(innerWidth - r.width - 8, cx - r.width / 2)) + 'px';
+    chip.style.top = (cy - r.height - 24 < 8 ? cy + 24 : cy - r.height - 24) + 'px';
+    clearTimeout(chipTimer); chipTimer = setTimeout(hideOffer, 6000);
+    return true;
   }
   function drawHover(ctx, s, i) {
     if (!hovered || i !== hoveredPage) return;
@@ -286,6 +315,6 @@ const KamLinks = (() => {
   }
   $('#btnAddBookmark').onclick = add;
 
-  function reset() { cache.clear(); hovered = null; render(); }
-  return { resolve, linksOf, linkAt, follow, hover, drawHover, reset, render, readOutline, add, showSide };
+  function reset() { cache.clear(); hovered = null; hideOffer(); render(); }
+  return { resolve, linksOf, linkAt, follow, hover, offer, drawHover, reset, render, readOutline, add, showSide };
 })();
