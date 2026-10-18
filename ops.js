@@ -466,8 +466,14 @@ async function burnedDoc() {
     if (flat && !$('#flattenForm').checked) toast('Form fields were merged into the page so your marks stay on top.', 5000);
   }
   const fonts = {}, imgs = {}, bundledFonts = {}, lost = new Set();
-  const fontNames = { Helvetica: ['Helvetica', 'HelveticaBold'], TimesRoman: ['TimesRoman', 'TimesRomanBold'], Courier: ['Courier', 'CourierBold'] };
-  const stdFont = async a => { const k = a.font + (a.bold ? 'B' : ''); if (!fonts[k]) fonts[k] = await doc.embedFont(StandardFonts[fontNames[a.font][a.bold ? 1 : 0]]); return fonts[k]; };
+  // regular, bold, italic, bold italic: the fourteen standard fonts have all four
+  const fontNames = { Helvetica: ['Helvetica', 'HelveticaBold', 'HelveticaOblique', 'HelveticaBoldOblique'], TimesRoman: ['TimesRoman', 'TimesRomanBold', 'TimesRomanItalic', 'TimesRomanBoldItalic'],
+                      Courier: ['Courier', 'CourierBold', 'CourierOblique', 'CourierBoldOblique'] };
+  const stdFont = async a => {
+    const v = (a.bold ? 1 : 0) + (a.italic ? 2 : 0), k = a.font + v;
+    if (!fonts[k]) fonts[k] = await doc.embedFont(StandardFonts[fontNames[a.font][v]]);
+    return fonts[k];
+  };
   const canWrite = (font, text) => { try { font.encodeText(text.replace(/\n/g, '')); return true; } catch (e) { return false; } };
   /* The font for text of ours. A standard font when it can write every letter, which adds
      nothing to the file; otherwise the bundled font of the same design and measurements, with
@@ -477,7 +483,7 @@ async function burnedDoc() {
   async function fontFor(a, text) {
     text = text.normalize('NFC').replace(/[\u200B-\u200F\u2060\uFEFF]/g, '');     // invisible marks no font draws
     if (fontNames[a.font]) { const f = await stdFont(a); if (canWrite(f, text)) return { font: f, text }; }
-    const key = KamFonts.keyFor(a.font, a.bold);
+    const key = KamFonts.keyFor(a.font, a.bold, a.italic);
     if (!bundledFonts[key]) {
       await KamFonts.ready(); doc.registerFontkit(window.fontkit);
       const b = await KamFonts.bundled(key);
@@ -578,8 +584,18 @@ async function burnedDoc() {
         page.drawEllipse({ x: c.x, y: c.y, xScale: a.w / 2, yScale: a.h / 2, rotate, color: a.fill ? hexToRgb(a.fill) : undefined, borderColor: a.stroke ? hexToRgb(a.stroke) : undefined, borderWidth: a.stroke ? a.width : 0, opacity: op, borderOpacity: op });
       } else if (a.type === 'text') {
         const { font, text } = await fontFor(a, (a.lines || [a.text]).join('\n'));
-        const base = toU(a.x - a.size * 0.9 * sin, a.y + a.size * 0.9 * cos);
-        page.drawText(text, { x: base.x, y: base.y, size: a.size, font, color: hexToRgb(a.color), opacity: op, rotate, lineHeight: a.size * 1.2 });
+        if (a.lineX && a.lineX.some(v => v)) {
+          // centred or right-aligned: each line where the screen puts it
+          text.split('\n').forEach((line, i) => {
+            if (!line) return;
+            const lx = a.lineX[i] || 0, ly = a.size * 0.9 + i * a.size * 1.2;
+            const p = toU(a.x + lx * cos - ly * sin, a.y + lx * sin + ly * cos);
+            page.drawText(line, { x: p.x, y: p.y, size: a.size, font, color: hexToRgb(a.color), opacity: op, rotate });
+          });
+        } else {
+          const base = toU(a.x - a.size * 0.9 * sin, a.y + a.size * 0.9 * cos);
+          page.drawText(text, { x: base.x, y: base.y, size: a.size, font, color: hexToRgb(a.color), opacity: op, rotate, lineHeight: a.size * 1.2 });
+        }
       } else if (a.type === 'image') {
         const img = await getImage(a);
         page.drawImage(img, { x: bl.x, y: bl.y, width: a.w, height: a.h, rotate, opacity: op });

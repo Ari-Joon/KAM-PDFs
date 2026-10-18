@@ -16,7 +16,7 @@ anything fails, so it works as a pre-commit or CI check.
 
 ## What it covers
 
-Seventy-six tests, grouped here by what they protect.
+Eighty-six tests, grouped here by what they protect.
 
 **Editing the PDF's own text**
 
@@ -28,6 +28,10 @@ Seventy-six tests, grouped here by what they protect.
 | letters the font does not have | come from the matching bundled font (Liberation Sans for Helvetica) and read back correctly |
 | kerning, letter and word spacing | a line set with all three keeps its spacing when words are added |
 | alignment | justified, right-aligned and centred lines stay lined up the way they were |
+| an edited paragraph flows | words move on to the next lines as a sentence grows and back as it shrinks; bold words stay bold wherever they land; no line runs past the margin; not one pixel changes outside the paragraph; the screen matches the file; PDFium reads the paragraph in order; undoing it gives back the old lines exactly |
+| a paragraph that grows | takes a new line below it where there is room; with no room it adds none over the next paragraph, loses nothing typed, and says so |
+| what is not a paragraph | lists, columns of amounts and an address keep each line to itself |
+| deleting in a paragraph | a line of an edited paragraph can be deleted, and Ctrl+Z puts the paragraph back |
 | form objects and turned pages | text drawn inside a form object (even one drawn twice) and text on a rotated page are edited where they are |
 | right-to-left lines | Hebrew and Arabic are covered and retyped rather than rewritten, so their words are never scrambled |
 | text the engine cannot rewrite | is still deleted, the older way, by redaction |
@@ -47,6 +51,17 @@ Seventy-six tests, grouped here by what they protect.
 | the page stays still | no tool and no selection moves the page under the mouse (the property row keeps its place) |
 | a shape just drawn | is selected, takes the colour and width chosen straight after, and the next one is drawn the same way |
 | Ctrl+S in a text box | saves, with what was just typed in it |
+| italic | a text box can be italic in every font, on screen and in the saved file, which uses the font's own italic |
+| a text box's alignment | centred and right-aligned boxes, wrapped and not, have each line in the saved file where the screen puts it |
+| a mark on every page | a selected mark is copied to the same place on every page, and one Ctrl+Z takes the copies off |
+
+**Signatures**
+
+| Test | Checks |
+|---|---|
+| saved signatures | the Signatures section lists them (one kept by an older version too), keeps a name through a reload, puts one on the page or on every page with one Ctrl+Z to take them off, and removes one |
+| a photo of a signature | the paper becomes see-through, the shadowed side too; the ink keeps its own colour; the picture is cropped to it; a picture with nothing on it says so |
+| today's date | goes under the signature just put on the page, written out with the month as a word, and is saved |
 
 **Opening PDFs from Windows**
 
@@ -133,7 +148,7 @@ Seventy-six tests, grouped here by what they protect.
 | combining PDFs | the Combine card's path joins a 2-page and a 3-page PDF into 5 pages |
 | the command search | Ctrl+K opens it with the cursor in it; every command points at a control that exists; "circle" finds the ellipse tool; a command in a folded section opens it and puts you in the box; document commands are marked, not run, with nothing open |
 | the menus | File and Shapes open and close, clicking elsewhere closes them, Escape closes a menu without changing your tool, and the Shapes button follows the shape in use |
-| sections and unsaved work | six Document sections, only Save & export open at first, the ones you open are remembered, and unsaved changes put a dot on Save and in the window title |
+| sections and unsaved work | seven Document sections, only Save & export open at first, the ones you open are remembered, and unsaved changes put a dot on Save and in the window title |
 | the first tip | it appears with the first document and never again once dismissed |
 
 ## Fixtures

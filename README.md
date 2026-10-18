@@ -7,7 +7,7 @@
 <p align="center"><b>A free PDF editor and document scanner that just works. No account, no subscription, no upload. Runs on your computer, even offline.</b></p>
 
 <p align="center">
-  <a href="#new-in-21">What's new</a> ·
+  <a href="#new-in-22">What's new</a> ·
   <a href="#download">Download</a> ·
   <a href="#what-it-does">Features</a> ·
   <a href="#scan-with-your-phone">Scanner</a> ·
@@ -28,6 +28,15 @@ That is a scam dressed up as software, and I got sick of it. So I built KAM PDFs
 **KAM PDFs is free. Not free for seven days, not free with a watermark, not free until you click Save. Free.** There is no account, no upgrade button, no trial, and no upload. Your files never leave your computer. It works with the internet unplugged.
 
 It stays that way. The code is MIT licensed, so it is yours to use, copy, and share with anyone. If someone ever tries to charge you for KAM PDFs, they are not me.
+
+## New in 2.2
+
+- **Edited paragraphs flow.** Retype words in the middle of a paragraph and the rest of it moves on to the next lines and back as you type, every word in its own font, bold and italic included. The margins and the justification stay as they were, and a paragraph that grows takes a new line when there is room below it.
+- **Italic text boxes**, in every font, and text boxes **centred or right-aligned**.
+- **A place for your signatures.** Document › Signatures keeps the signatures and initials you draw, each with a name if you give it one. Click one to put it on the page, or put it on every page at once. A photo or scan of your signature on paper works too: the paper is made see-through and the edges cropped.
+- **Today's date** goes under your signature with one click, written out (18 October 2026) so it can't be misread.
+- **Every page.** Select anything you added, such as your initials or a stamp, and put a copy at the same place on every page. One Ctrl+Z takes the copies off again.
+- **The page stays still on smaller screens too.** The row with colour, size and font always fits on one line; on a narrower window its words give way to the controls themselves, so choosing a tool or selecting something never moves the page.
 
 ## New in 2.1
 
@@ -81,13 +90,15 @@ Unzip and open `index.html` in Chrome, Edge, Firefox, or Safari. Everything work
 - Opens to a simple question, *what would you like to do?*, with four answers: edit or sign a PDF, combine PDFs, turn photos into a PDF, or scan a document. Nothing else is on screen until there is a document to work on
 - Press **Ctrl+K** and type what you want, like *watermark*, *rotate* or *sign*, and press Enter. Every command is in there, so you never have to know where something lives
 - Rarely used actions sit in the **File** menu; the four shapes share one **Shapes** button; zoom and page controls live in a status bar under the page
-- The Document tab folds into sections (Save & export, Stamp every page, Scanned pages, Text & spelling, Document details, Settings) and remembers which ones you keep open
+- The Document tab folds into sections (Save & export, Signatures, Stamp every page, Scanned pages, Text & spelling, Document details, Settings) and remembers which ones you keep open
 - A dot on **Save PDF** and in the window title tells you there are unsaved changes. Opening another file, starting a new one or restoring a session asks **Save / Don't save / Cancel** first, so work is never thrown away without asking
 
 **Edit the text that's already there**
 - Double-click any line of the PDF's own text and retype it in place. The letters come from the font inside the PDF, at the same size, colour and spacing, so the line looks exactly as it did, only with your words. What you see while typing is drawn from the same layout that is written into the file, so the saved PDF matches the screen
 - If the document's font doesn't have a letter you type (PDFs often carry only the letters they use), it comes from a matching font that ships with KAM PDFs: Carlito for Calibri, Caladea for Cambria, and Liberation Sans, Serif and Mono for Arial and Helvetica, Times, and Courier. Each has the same letter widths as the font it stands in for, so the line still lines up
-- The line keeps its alignment as you type: left-aligned text grows to the right, right-aligned and centred lines stay that way, and justified lines keep both margins
+- In a paragraph, the words flow on to the next lines and back as you type, the way they would in a word processor. Each word keeps its own font, so a bold or italic word stays bold or italic wherever it lands, and the paragraph keeps its margins, its justification and its line spacing. A paragraph that grows takes a new line when there is empty space below it; when there isn't, KAM PDFs says so rather than writing over what is there
+- A line on its own keeps its alignment as you type: left-aligned text grows to the right, right-aligned and centred lines stay that way, and justified lines keep both margins
+- An address or a list is recognised as lines on their own, so its words stay on the line they are on
 - Click a line and press Delete, and the words are taken out of the page itself. Nothing is painted over them, so table borders, shading and anything else nearby stay exactly as they were
 - Works on text in any language the PDF's font can write, including accents, Polish, Greek and Russian
 - A few lines can't be rewritten like this: right-to-left scripts such as Arabic and Hebrew, and text drawn in unusual ways. Those are edited the older way, by covering the line and typing over it, and deleting one redacts it. Those deleted areas are hatched in red on screen so you can see them (the hatch is not saved), and clicking one selects the deletion, so Delete there puts the words back
@@ -125,7 +136,7 @@ Unzip and open `index.html` in Chrome, Edge, Firefox, or Safari. Everything work
 - OCR reads the words off a scanned page and adds them to the saved PDF as an invisible layer, so the scan becomes searchable. It runs on your computer, like everything else
 
 **Annotate**
-- Text in Helvetica, Times, Courier, Carlito (a free twin of Calibri) or Caladea (Cambria's twin), bold, any size and colour. Change any of it while you type, or later by clicking the box once
+- Text in Helvetica, Times, Courier, Carlito (a free twin of Calibri) or Caladea (Cambria's twin), bold or italic, left, centred or right-aligned, any size and colour. Change any of it while you type, or later by clicking the box once
 - A shape you have just drawn stays selected, so its colour and line width can be changed straight away; the next one is drawn the same way
 - Type in any language: letters outside the basic Western set, such as Polish, Greek or Russian, are saved with a bundled font so they come out right in the file
 - Freehand pen, lines, arrows, rectangles, ellipses
@@ -135,8 +146,15 @@ Unzip and open `index.html` in Chrome, Edge, Firefox, or Safari. Everything work
 - Move, resize, recolour, and delete anything you added, with undo and redo
 - Copy, paste, duplicate, and nudge annotations with the keyboard; paste images or text from the clipboard
 - Hold Shift to keep a rectangle or ellipse square, or snap a line or arrow to 45 degrees
-- Signatures you draw are kept, so you can reuse one with a click instead of drawing it again
+- Select any mark and put a copy at the same place on every page, with one Ctrl+Z to take the copies off
 - Spell checking on text you add: misspellings are underlined, with suggested corrections and your own dictionary for names and jargon
+
+**Sign**
+- Draw your signature once. It is kept on this computer, in **Document › Signatures**, with a name if you give it one (Initials, say), so next time it is one click
+- Click a signature to put it on the page, or put it on every page at once, low on the right where initials go
+- Use a photo or scan of your signature on paper instead: it is cleaned up first, the paper made see-through even where the photo is in shadow, the ink kept in its own colour, and the edges cropped
+- **Today's date** goes under the signature with one click, written out so it reads the same everywhere
+- Nothing about your signatures leaves your computer
 
 **Phones and tablets**
 - On a phone the page gets the whole screen. The pages list and bookmarks slide in from the left and the Document panel from the right, whenever you want them
@@ -278,7 +296,7 @@ KAM PDFs is plain HTML, CSS, and JavaScript. Rendering uses [pdf.js](https://moz
 
 Annotations are kept on a layer over the page while you work and are drawn into the PDF itself when you save, so the result opens correctly in any PDF viewer.
 
-Editing the PDF's own text is KAM PDFs' own code (`content.js`). It reads the page's drawing instructions the way a PDF viewer does, checks every letter it finds against what pdf.js draws, and groups the letters into lines. When you retype a line, it rewrites only the instructions for the letters that changed, using the font inside the PDF, and moves the rest of the line the way the line is aligned. Everything else on the page is left as it was, and the tests check that not one pixel outside the edited lines changes. The live preview is drawn from that same layout, which is why the saved file matches the screen.
+Editing the PDF's own text is KAM PDFs' own code (`content.js`). It reads the page's drawing instructions the way a PDF viewer does, checks every letter it finds against what pdf.js draws, and groups the letters into lines. When you retype a line, it rewrites only the instructions for the letters that changed, using the font inside the PDF, and moves the rest of the line the way the line is aligned. Lines that belong together (the same font size and spacing, a shared margin, and lines full enough to have wrapped) are treated as a paragraph: the words are broken into lines again from the first change onwards, and a word that moves to another line is written there with its own font, colour and spacing. Everything else on the page is left as it was, and the tests check that not one pixel outside the edited lines changes. The live preview is drawn from that same layout, which is why the saved file matches the screen.
 
 ```
 index.html              layout and styles
@@ -293,6 +311,7 @@ fonts/                  Liberation, Carlito and Caladea (loaded when a letter ne
 crypt.js                opening password-protected PDFs (RC4, AES-128, AES-256)
 links.js                links in the PDF, and the Bookmarks list
 launch.js               opening a PDF straight from Windows ("Open with")
+signatures.js           your saved signatures, and cleaning up a photo of one
 lib/                    pdf.js, pdf-lib, fontkit, peerjs, qrcode (all bundled)
 lib/ocr/                Tesseract and its English data (loaded on first use)
 pdftext.js              index of the PDF's own text: positions, lines, search
@@ -328,7 +347,7 @@ tests/run.js            the test suite: node tests/run.js
 
 ## Limits
 
-- Text is edited a line at a time. A line doesn't wrap onto the next one as it grows, so a much longer sentence runs on past the margin: shorten it, or split it across lines yourself.
+- A paragraph only grows into a new line where there is empty space below it; it never pushes the rest of the page down. When there is no room, its end runs past the margin and KAM PDFs says so: shorten it, or make room under it. A line on its own, such as a heading or a line in a table, doesn't wrap at all.
 - A few lines are edited the older way, by covering them and typing over in one of the built-in fonts: right-to-left scripts such as Arabic and Hebrew, and text drawn in unusual ways (vertical, mirrored, or invisible like the text layer of a scan). Covering hides the old words rather than removing them; pressing Delete on such a line does remove them, with a redaction.
 - A scanned page is a picture, so there is no text on it to retype. Cover and type over it, or run OCR to make it searchable.
 - Whiteout **hides** what is under it, it does not delete it: the words can still be extracted from the file. Use **Redact** when something must actually be gone. The test suite asserts both behaviours so neither can drift.
@@ -343,17 +362,17 @@ tests/run.js            the test suite: node tests/run.js
 node tests/run.js
 ```
 
-Seventy-six tests. Text editing is checked on documents made every way they are made in real
+Eighty-six tests. Text editing is checked on documents made every way they are made in real
 life: by pdf-lib, by Chrome's own "Save as PDF" inside the test, and by Microsoft Word, with
-kerning, letter spacing, tabs, bullets, justified lines, form objects, turned pages, and
-Polish, Greek, Russian, Hebrew and Arabic text. Each edit is checked three ways: not one pixel
+kerning, letter spacing, tabs, bullets, justified lines, paragraphs that flow, form objects,
+turned pages, and Polish, Greek, Russian, Hebrew and Arabic text. Each edit is checked three ways: not one pixel
 may change outside the edited lines, the screen must match the saved file, and a second PDF
 engine (PDFium, the one in Chrome and Edge) must read the new words and none of the old.
 
 Your own marks are tested with the real mouse and keyboard, so focus moves the way it does
 for a person: that is how a text box closing when you clicked its Size field was caught.
 
-The rest cover opening PDFs from Windows, page operations, annotation fidelity, form fields, selection, find, spell
+The rest cover opening PDFs from Windows, saved signatures, page operations, annotation fidelity, form fields, selection, find, spell
 checking, redaction, OCR, layers, the working copy, undo, memory, password-protected PDFs,
 links and bookmarks, phones and tablets, the scanner, the movable panels, the icon set, the
 welcome screen, the menus, the command search and the update check. Needs Node 18+ and

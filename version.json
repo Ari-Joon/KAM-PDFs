@@ -1,5 +1,5 @@
 {
-  "version": "2.1.0",
-  "notes": "open PDFs straight from Windows with Open with, text boxes that take the size and font you choose while you type, and a page that no longer jumps",
+  "version": "2.2.0",
+  "notes": "edited paragraphs flow from line to line, italic and centred or right-aligned text boxes, and a place for your saved signatures",
   "url": "https://github.com/Ari-Joon/KAM-PDFs/releases/latest"
 }

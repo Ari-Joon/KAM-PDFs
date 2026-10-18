@@ -176,11 +176,11 @@ const KamFonts = (() => {
   const winAnsi = ch => { const c = ch.codePointAt(0); return (c >= 0x20 && c <= 0x7e) || (c >= 0xa0 && c <= 0xff) || WIN_ANSI_EXTRA.includes(ch); };
   // The characters of your own text that cannot be saved in the font you chose: not a standard
   // font letter, and not in the bundled font that stands in for it either.
-  async function unsaveable(font, bold, text) {
+  async function unsaveable(font, bold, text, italic) {
     const std = font === 'Helvetica' || font === 'TimesRoman' || font === 'Courier';
     const need = [...new Set(text)].filter(ch => !/\s/.test(ch) && !(std && winAnsi(ch)));
     if (!need.length) return [];
-    const b = await bundled(keyFor(font, bold));
+    const b = await bundled(keyFor(font, bold, italic));
     return missingFrom(b.fk, need.join(''));
   }
 

@@ -47,6 +47,10 @@ const KamPalette = (() => {
     cmd('Tool', 'redact', 'Redact', 'black out remove censor permanently hide private', byTool('redact'), { kbd: 'X', doc: true }),
     cmd('Tool', 'image', 'Insert an image', 'picture photo logo stamp', byClick('#btnImage'), DOC),
     cmd('Tool', 'sign', 'Add a signature', 'sign autograph initial', byClick('#btnSign'), DOC),
+    cmd('Tool', 'sign', 'Your saved signatures', 'signatures initials kept stored manage picture photo scan', byReveal('sigs', '#btnSigDraw')),
+    cmd('Tool', 'text', 'Put today\'s date on the page', 'date today dated day signed when', byClick('#btnSigDate'), DOC),
+    cmd('Edit', 'pages', 'Put the selected mark on every page', 'copy all pages initials stamp repeat each', byClick('#btnEveryPage'),
+      { doc: true, when: () => !!state.selected && state.pageIds.length > 1 }),
 
     cmd('Page', 'rot-left', 'Rotate page left', 'turn anticlockwise counterclockwise', byClick('.side-actions [data-act="rotL"]'), DOC),
     cmd('Page', 'rot-right', 'Rotate page right', 'turn clockwise', byClick('.side-actions [data-act="rotR"]'), DOC),

@@ -172,11 +172,26 @@ body.resizing #sidebar,body.resizing #rightpanel{transition:none}
 #toolbar .sep{display:none}
 #tools{display:flex;flex-wrap:wrap;gap:6px}
 #tools button{padding:5px 9px}
-#props{display:flex;align-items:center;gap:8px 12px;flex-wrap:wrap;min-height:30px}
-#props label{display:none;align-items:center;gap:5px;font-size:12px;color:var(--muted)}
+/* One line, always: a row that wrapped would change height with whatever is selected, and move
+   the page under the mouse. When it is narrow, the words give way to the controls' own looks
+   (each keeps its name as a tooltip), and only then does it scroll sideways. */
+#propsWrap{container-type:inline-size;min-width:0}
+#props{display:flex;align-items:center;gap:8px 10px;flex-wrap:nowrap;min-height:36px;padding:3px;margin:-3px;overflow-x:auto;overflow-y:hidden;scrollbar-width:none}
+#props::-webkit-scrollbar{display:none}
+#props label{display:none;align-items:center;gap:5px;font-size:12px;color:var(--muted);flex:none}
 #props label.on{display:flex}
+#props button{flex:none}
 #props input[type=number]{width:58px}
-#props input[type=range]{width:80px}
+#props input[type=range]{width:64px}
+#pFont{max-width:124px}
+#props .lbl-n{display:none;font-size:13px;color:var(--text)}
+@container (max-width: 860px) { #props .act-lbl{display:none} }
+@container (max-width: 730px) { #props .lbl{display:none} }
+@container (max-width: 600px) {
+  #props{column-gap:6px}
+  #props .lbl-w{display:none} #props .lbl-n{display:inline}
+  #pFont{max-width:96px} #props input[type=number]{width:46px} #props input[type=range]{width:48px}
+}
 #hint{flex:1;min-width:0}
 
 #viewport{flex:1;min-height:0;overflow:auto;background:var(--viewport);position:relative;scrollbar-gutter:stable;overflow-anchor:none}
@@ -224,6 +239,15 @@ body.no-doc #pages{display:none}
 #modalBox .primary{background:var(--accent);border-color:var(--accent);color:var(--accent-text)}
 #sigPad{background:#fff;border-radius:6px;touch-action:none;display:block;cursor:crosshair;border:1px solid var(--border);max-width:100%}
 .sig-saved{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px}
+.sig-list{display:flex;flex-direction:column;gap:8px;margin-bottom:10px}
+.sig-item{display:grid;grid-template-columns:minmax(0,1fr) auto auto;grid-template-areas:"pick pick del" "name every every";gap:6px;align-items:center;background:var(--panel2);border:1px solid var(--border);border-radius:8px;padding:6px}
+.sig-pick{grid-area:pick;background:#fff;border:1px solid var(--border);border-radius:6px;padding:4px 8px;height:56px;width:100%;display:flex;align-items:center;justify-content:center;cursor:pointer}
+.sig-pick img{max-height:46px;max-width:100%;display:block}
+.sig-pick:hover{border-color:var(--accent)}
+.sig-remove{grid-area:del;align-self:start;padding:5px 7px}
+.sig-name{grid-area:name;min-width:0;width:100%}
+.sig-every{grid-area:every;padding:5px 8px;font-size:12px;white-space:nowrap}
+.sig-none{margin-bottom:8px}
 .sig-card{position:relative;background:#fff;border:1px solid var(--border);border-radius:6px;padding:4px}
 .sig-card img{height:52px;display:block;cursor:pointer}
 .sig-del{position:absolute;top:-7px;right:-7px;width:20px;height:20px;padding:0;border-radius:999px;font-size:11px;line-height:1}
@@ -311,11 +335,7 @@ kbd{background:var(--kbd);border:1px solid var(--border);border-radius:4px;paddi
   #tools button{font-size:0;gap:0;padding:8px 11px;flex:none}
   #tools .ic-caret,.tsep{display:none}
   #tools .menu{position:fixed;top:auto;left:8px;right:8px;min-width:0}
-  /* one row that scrolls sideways, like the tools above it: a row that wrapped would change
-     height with whatever is selected, and move the page each time */
-  #props{gap:6px 10px;flex-wrap:nowrap;overflow-x:auto;overscroll-behavior-x:contain;scrollbar-width:none;margin:0 -8px;padding:0 8px}
-  #props::-webkit-scrollbar{display:none}
-  #props label,#props button{flex:none}
+  #props{gap:6px 10px;overscroll-behavior-x:contain;margin:-3px -8px;padding:3px 8px}
   .status-hint{display:none}
   #pager{display:flex;justify-content:space-between;gap:8px;padding:4px 8px}
   .fit-label{display:none}
@@ -574,17 +594,20 @@ details.tip>div{padding:0 2px 11px;line-height:1.55}
         <button id="btnSign" title="Add your signature"><svg class="ic" aria-hidden="true"><use href="#i-sign"/></svg> Sign</button>
       </div>
       <div class="sep"></div>
-      <div id="props">
+      <div id="propsWrap"><div id="props">
         <span id="propsHint"></span>
-        <label data-p="color">Color <input type="color" id="pColor" value="#e11d48"></label>
+        <label data-p="color"><span class="lbl">Color</span> <input type="color" id="pColor" value="#e11d48" title="Colour"></label>
         <label data-p="fill">Fill <input type="checkbox" id="pFillOn"> <input type="color" id="pFill" value="#ffff00"></label>
-        <label data-p="width">Width <input type="number" id="pWidth" min="0.5" max="50" step="0.5" value="2"></label>
-        <label data-p="size">Size <input type="number" id="pSize" min="4" max="200" step="1" value="16"></label>
-        <label data-p="font">Font <select id="pFont"><option value="Helvetica">Helvetica</option><option value="TimesRoman">Times</option><option value="Courier">Courier</option><option value="Carlito">Carlito (like Calibri)</option><option value="Caladea">Caladea (like Cambria)</option></select></label>
-        <label data-p="bold"><input type="checkbox" id="pBold"> Bold</label>
-        <label data-p="opacity">Opacity <input type="range" id="pOpacity" min="0.05" max="1" step="0.05" value="1"></label>
-        <button id="btnDelAnnot" style="display:none" title="Delete selected (Del)"><svg class="ic" aria-hidden="true"><use href="#i-trash"/></svg> Delete</button>
-      </div>
+        <label data-p="width"><span class="lbl">Width</span> <input type="number" id="pWidth" min="0.5" max="50" step="0.5" value="2" title="Line width"></label>
+        <label data-p="size"><span class="lbl">Size</span> <input type="number" id="pSize" min="4" max="200" step="1" value="16" title="Text size"></label>
+        <label data-p="font"><span class="lbl">Font</span> <select id="pFont" title="Font"><option value="Helvetica">Helvetica</option><option value="TimesRoman">Times</option><option value="Courier">Courier</option><option value="Carlito">Carlito (like Calibri)</option><option value="Caladea">Caladea (like Cambria)</option></select></label>
+        <label data-p="bold" title="Bold"><input type="checkbox" id="pBold" aria-label="Bold"> <span class="lbl-w">Bold</span><b class="lbl-n" aria-hidden="true">B</b></label>
+        <label data-p="italic" title="Italic"><input type="checkbox" id="pItalic" aria-label="Italic"> <span class="lbl-w">Italic</span><i class="lbl-n" aria-hidden="true">I</i></label>
+        <label data-p="align"><select id="pAlign" title="Align" aria-label="Align"><option value="left">Left</option><option value="center">Centre</option><option value="right">Right</option></select></label>
+        <label data-p="opacity"><span class="lbl">Opacity</span> <input type="range" id="pOpacity" min="0.05" max="1" step="0.05" value="1" title="Opacity"></label>
+        <button id="btnEveryPage" style="display:none" title="Put a copy of it at the same place on every page" aria-label="Every page"><svg class="ic" aria-hidden="true"><use href="#i-pages"/></svg><span class="act-lbl"> Every page</span></button>
+        <button id="btnDelAnnot" style="display:none" title="Delete selected (Del)" aria-label="Delete"><svg class="ic" aria-hidden="true"><use href="#i-trash"/></svg><span class="act-lbl"> Delete</span></button>
+      </div></div>
     </div>
     <div id="coach" role="status" hidden>
       <svg class="ic" aria-hidden="true"><use href="#i-bulb"/></svg><span><b>Tip:</b> double-click any text in the PDF to edit it, and press <kbd>Ctrl+K</kbd> to find any command by name.</span>
@@ -653,6 +676,15 @@ details.tip>div{padding:0 2px 11px;line-height:1.55}
           <h4>Extract pages</h4>
           <div class="row"><input id="extractRange" placeholder="e.g. 1-3, 7, 10-12" style="flex:1" aria-label="Pages to extract"><button id="btnExtract">Extract</button></div>
           <div class="muted">Saves the listed pages as a separate PDF.</div>
+        </div>
+      </details>
+      <details class="sec" data-sec="sigs">
+        <summary><svg class="ic" aria-hidden="true"><use href="#i-sign"/></svg><span><b>Signatures</b><small>Yours and your initials, kept on this computer</small></span></summary>
+        <div class="sec-body">
+          <div id="sigList" class="sig-list"></div>
+          <div class="row"><button id="btnSigDraw"><svg class="ic" aria-hidden="true"><use href="#i-sign"/></svg> Draw one</button><button id="btnSigPicture"><svg class="ic" aria-hidden="true"><use href="#i-image"/></svg> Use a picture of yours</button><button id="btnSigDate" title="Today's date as text, under the selected signature"><svg class="ic" aria-hidden="true"><use href="#i-text"/></svg> Today's date</button></div>
+          <div class="muted">Click a signature to put it on the page. A photo or scan of your signature on paper is cleaned up first: the paper made see-through, the edges cropped. Nothing leaves this computer.</div>
+          <input type="file" id="sigPictureInput" accept="image/*" hidden>
         </div>
       </details>
       <details class="sec" data-sec="stamp">
@@ -729,11 +761,12 @@ details.tip>div{padding:0 2px 11px;line-height:1.55}
         <kbd>Shift</kbd> while drawing · square shapes, 45° lines
       </div>
       <h4>How do I…</h4>
-      <details class="tip"><summary>Edit text that is already in the PDF</summary><div class="muted">With <b>Select</b> chosen, hover over any text in the PDF and it lights up. Double-click a line to retype it where it is, in the PDF's own font, size and colour; the rest of the line moves along as you type, keeping its alignment. <kbd>Enter</kbd> or <kbd>Esc</kbd> finishes. What you see is exactly what is saved.</div></details>
+      <details class="tip"><summary>Edit text that is already in the PDF</summary><div class="muted">With <b>Select</b> chosen, hover over any text in the PDF and it lights up. Double-click a line to retype it where it is, in the PDF's own font, size and colour. In a paragraph, the words flow on to the next lines and back as you type, each in its own font, and a paragraph that grows takes a new line when there is room below it. A line on its own moves along as you type, keeping its alignment. <kbd>Enter</kbd> or <kbd>Esc</kbd> finishes. What you see is exactly what is saved.</div></details>
       <details class="tip"><summary>Open PDFs straight from Windows</summary><div class="muted">Right-click a PDF and choose <b>Open with › KAM PDFs</b>. To make KAM PDFs the app for every PDF, choose <b>Open with › Choose another app</b>, pick KAM PDFs and tick <b>Always</b>. In KAM PDFs installed from the website, <b>Save</b> then puts your changes straight back into that file (the browser asks you once), and <b>Save As</b> makes a copy.</div></details>
-      <details class="tip"><summary>Add your own text</summary><div class="muted">Choose <b>Text</b>, then click to place it, or drag out a box first so the words wrap to fit. While you type, the colour, size, font and Bold controls change that box. Double-click it later to type in it again, or click it once to change how it looks. Paste an image from the clipboard with Ctrl+V.</div></details>
+      <details class="tip"><summary>Add your own text</summary><div class="muted">Choose <b>Text</b>, then click to place it, or drag out a box first so the words wrap to fit. While you type, the colour, size, font, Bold and Italic controls change that box. Double-click it later to type in it again, or click it once to change how it looks. Paste an image from the clipboard with Ctrl+V.</div></details>
       <details class="tip"><summary>Delete text from the PDF</summary><div class="muted">Click a line of the PDF's own text and press Delete. The words are taken out of the page itself, and nothing around them moves; <kbd>Ctrl+Z</kbd> brings them back. A few lines, such as Arabic or Hebrew, are redacted instead: those show a red hatch on screen only, and clicking the hatch and pressing Delete again brings the words back.</div></details>
-      <details class="tip"><summary>Sign a document</summary><div class="muted">Choose <b>Sign</b>, draw your signature once, and place it on the page. It is kept on this computer, so next time you pick it from the gallery instead of drawing it again.</div></details>
+      <details class="tip"><summary>Sign a document</summary><div class="muted">Choose <b>Sign</b>, draw your signature once, and place it on the page. It is kept on this computer, in <b>Document → Signatures</b>: click one there to put it on the page, give it a name (Initials, say), or put it on every page at once. A photo or scan of your signature on paper works too: the paper is made see-through and the edges cropped.</div></details>
+      <details class="tip"><summary>Put a mark on every page</summary><div class="muted">Select anything you have added, such as your initials, a stamp or a note, and click <b>Every page</b>, the button with two pages on it beside Delete. A copy goes at the same place on every other page, and one <kbd>Ctrl+Z</kbd> takes the copies off again.</div></details>
       <details class="tip"><summary>Whiteout or Redact?</summary><div class="muted"><b>Whiteout</b> covers things visually, but the words are still in the file and can be copied out. <b>Redact</b> removes them: when you save, that page is rebuilt from a picture of itself, so the hidden words are gone for good.</div></details>
       <details class="tip"><summary>Reach a mark buried under others</summary><div class="muted">The <b>Layers</b> tab lists everything you have added to the page, newest first. Select, hide, restack (drag a row) or delete anything. Text edits and deletions are listed too, quoting the words, so you can take one back. Double-click anywhere, even inside a whiteout, to type there.</div></details>
       <details class="tip"><summary>Scan with your phone</summary><div class="muted">Click <b>Scan</b> and point your phone at the QR code. Photograph pages and tap Send; they arrive straightened and cleaned up. No phone? Use the webcam or photos you already have.</div></details>
@@ -792,6 +825,7 @@ details.tip>div{padding:0 2px 11px;line-height:1.55}
 <script src="palette.js"></script>
 <script src="scan-desktop.js"></script>
 <script src="sw-register.js"></script>
+<script src="signatures.js"></script>
 <script src="launch.js"></script>
 </body>
 </html>

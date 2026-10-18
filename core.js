@@ -5,7 +5,7 @@ pdfjsLib.GlobalWorkerOptions.workerSrc = 'lib/pdf.worker.min.js';
 
 /* Bumped with each release, and shown in the Help tab. Because it lives in the code that
    is actually running, it tells you which version you have rather than which is newest. */
-const KAM_VERSION = '2.1.0';
+const KAM_VERSION = '2.2.0';
 
 const $ = s => document.querySelector(s);
 const $$ = s => [...document.querySelectorAll(s)];
@@ -31,7 +31,7 @@ const state = {
   pageSize: { w: 0, h: 0 },
 };
 
-const defaults = { color: '#e11d48', fill: '#ffff00', fillOn: false, width: 2, size: 16, font: 'Helvetica', bold: false, opacity: 1 };
+const defaults = { color: '#e11d48', fill: '#ffff00', fillOn: false, width: 2, size: 16, font: 'Helvetica', bold: false, italic: false, align: 'left', opacity: 1 };
 
 /* ---------- small utilities ---------- */
 let toastTimer;

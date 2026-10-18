@@ -110,14 +110,17 @@ async function browser() {
     reload: async () => {
       errors.length = 0;
       await send('Page.navigate', { url: `http://localhost:${PORT}/index.html?t=${Date.now()}` });
-      // every script has run once the last ones (the command search, the viewer) are there
-      await waitFor(`typeof state !== 'undefined' && typeof pdfTextEditAt === 'function' && typeof KamSpell !== 'undefined' && typeof KamPalette !== 'undefined' && typeof KamView !== 'undefined'`);
+      // every script has run once the last ones (the signatures, then opening a PDF from Windows)
+      // are there: a test that starts before them finds half an app
+      await waitFor(`typeof state !== 'undefined' && typeof pdfTextEditAt === 'function' && typeof KamSpell !== 'undefined' && typeof KamPalette !== 'undefined' && typeof KamView !== 'undefined'
+        && typeof KamSigs !== 'undefined' && typeof KamLaunch !== 'undefined'`);
     },
-    // Pretend to be a phone or tablet (null puts the desktop back), with a touch screen.
+    // Pretend to be a phone or tablet (null puts the desktop back), with a touch screen; or, with
+    // desktop: true, a computer screen of another size.
     emulate: async m => {
       if (!m) { await send('Emulation.clearDeviceMetricsOverride'); await send('Emulation.setTouchEmulationEnabled', { enabled: false }); return; }
-      await send('Emulation.setDeviceMetricsOverride', { width: m.width, height: m.height, deviceScaleFactor: m.dpr || 2, mobile: true });
-      await send('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 5 });
+      await send('Emulation.setDeviceMetricsOverride', { width: m.width, height: m.height, deviceScaleFactor: m.dpr || (m.desktop ? 1 : 2), mobile: !m.desktop });
+      if (!m.desktop) await send('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 5 });
     },
     // Real touches, as a finger makes them: type is touchStart, touchMove or touchEnd.
     touch: (type, points) => send('Input.dispatchTouchEvent', { type, touchPoints: points.map(([x, y], id) => ({ x, y, id })) }),
@@ -1848,9 +1851,189 @@ test('a text box takes the size, font and bold you choose, while you type it and
   ok((await b.evaluate(fontsOfSaved(saved))).includes('Courier-Bold'), 'in the font chosen for it');
 });
 
+test('a text box can be italic, in every font, and is saved in the italic font', async b => {
+  await b.reload();
+  await b.evaluate(makeDoc(`doc.addPage([595, 842]);`));
+  await b.waitFor(settled);
+  await b.evaluate(`setZoom(1); setTool('text'); 1`); await b.waitFor(settled);
+  const fonts = { Helvetica: /Helvetica-(Bold)?Oblique/, TimesRoman: /Times-(Bold)?Italic/, Courier: /Courier-(Bold)?Oblique/, Carlito: /Carlito-(Bold)?Italic/ };
+  let y = 100;
+  for (const f of Object.keys(fonts)) {
+    await b.click(...await b.onPage(80, y)); y += 60;
+    await b.typeText(`Italic in ${f}`);
+    await choose(b, '#pFont', f);
+    // the next box starts the way the last one was set, so only switch it on when it is off
+    if (!(await b.evaluate(`document.getElementById('pItalic').checked`))) await b.click(...await b.at('#pItalic'));
+    await b.key('Escape');
+  }
+  const boxes = await b.evaluate(`curAnnots().filter(a => a.type === 'text').map(a => [a.font, !!a.italic, fontCss(a, 1).startsWith('italic')])`);
+  eq(boxes, Object.keys(fonts).map(f => [f, true, true]), 'each box is italic, on screen too');
+  const saved = await b.evaluate(exportBase64);
+  const used = await b.evaluate(fontsOfSaved(saved));
+  for (const [f, re] of Object.entries(fonts)) ok(used.some(n => re.test(n)), `${f} was not saved in its italic: ${used}`);
+  ok((await b.evaluate(textOf(saved)))[0].includes('Italic in Carlito'), 'the text reads back');
+});
+
+test('a text box can be centred or right-aligned, wrapped or not, and is saved that way', async b => {
+  await b.reload();
+  await b.evaluate(makeDoc(`doc.addPage([595, 842]);`));
+  await b.waitFor(settled);
+  await b.evaluate(`setZoom(1); setTool('text'); 1`); await b.waitFor(settled);
+  // a box dragged out 300pt wide, so the words wrap in it, centred while it is typed
+  await b.drag(...await b.onPage(100, 100), ...await b.onPage(400, 130));
+  await choose(b, '#pColor', '#111111');
+  await choose(b, '#pAlign', 'center');
+  await b.typeText('Agreed by both parties on the day that this agreement was signed');
+  eq(await b.evaluate(`getComputedStyle(document.getElementById('textEditor')).textAlign`), 'center', 'the words are centred while they are typed');
+  await b.key('Escape');
+  const boxOf = `(() => { const a = curAnnots().find(a => a.type === 'text' && a.boxW); return { align: a.align, boxW: a.boxW, x: a.x, y: a.y, lines: a.lines, size: a.size }; })()`;
+  const box = await b.evaluate(boxOf);
+  eq([box.align, Math.round(box.boxW)], ['center', 300], 'a centred box, 300pt wide');
+  ok(box.lines.length >= 2, 'the words wrap: ' + JSON.stringify(box.lines));
+  const spans = async saved => {
+    const out = [];
+    for (let i = 0; i < box.lines.length; i++) { const top = box.y + i * box.size * 1.2; out.push(await b.evaluate(inkSpan(saved, top + 2, top + box.size * 1.1))); }
+    return out;
+  };
+  let saved = await b.evaluate(exportBase64);
+  for (const [i, [l, r]] of (await spans(saved)).entries())
+    ok(Math.abs((l + r) / 2 - (box.x + box.boxW / 2)) < 2, `line ${i + 1} is centred in the saved file: ${l.toFixed(1)}..${r.toFixed(1)} in ${box.x.toFixed(1)}..${(box.x + box.boxW).toFixed(1)}`);
+  let diff = await b.evaluate(exportVsScreen(0));
+  ok(diff.differing / diff.total < 0.0005, `the screen and the file agree: ${diff.differing} of ${diff.total} pixels differ`);
+  // right-aligned: every line ends at the box's right edge
+  await choose(b, '#pAlign', 'right');
+  saved = await b.evaluate(exportBase64);
+  for (const [i, [, r]] of (await spans(saved)).entries())
+    ok(Math.abs(r - (box.x + box.boxW)) < 2, `line ${i + 1} ends at the right edge: ${r.toFixed(1)} vs ${(box.x + box.boxW).toFixed(1)}`);
+  // a box without a width, its lines broken with Enter: right-aligned, they end together
+  await b.evaluate(`setTool('text'); 1`);
+  await b.click(...await b.onPage(100, 400));
+  await b.typeText('Short'); await b.key('Enter'); await b.typeText('A much longer second line');
+  await b.key('Escape');
+  const free = await b.evaluate(`(() => { const a = curAnnots().find(a => a.type === 'text' && !a.boxW); return { align: a.align, lines: a.lines, x: a.x, y: a.y, w: a.w, size: a.size }; })()`);
+  eq([free.align, free.lines], ['right', ['Short', 'A much longer second line']], 'the next box starts right-aligned, as the last one was set');
+  saved = await b.evaluate(exportBase64);
+  const ends = [];
+  for (let i = 0; i < 2; i++) { const top = free.y + i * free.size * 1.2; ends.push((await b.evaluate(inkSpan(saved, top + 2, top + free.size * 1.1)))[1]); }
+  ok(Math.abs(ends[0] - ends[1]) < 1.5 && Math.abs(ends[1] - (free.x + free.w)) < 2, `both lines end together: ${ends.map(e => e.toFixed(1))}`);
+  diff = await b.evaluate(exportVsScreen(0));
+  ok(diff.differing / diff.total < 0.0005, `the screen and the file still agree: ${diff.differing} of ${diff.total} pixels differ`);
+  ok((await b.evaluate(textOf(saved)))[0].includes('A much longer second line'), 'the text reads back');
+});
+
+test("today's date goes on the page as text, under the signature just put there", async b => {
+  await b.reload();
+  await b.evaluate(makeDoc(`doc.addPage([595, 842]);`));
+  await b.waitFor(settled);
+  // a signature put on the page, and selected, as it is after the Sign dialog
+  await b.evaluate(`(() => { const c = document.createElement('canvas'); c.width = 120; c.height = 40; const g = c.getContext('2d'); g.strokeStyle = '#123'; g.lineWidth = 3; g.beginPath(); g.moveTo(5, 30); g.lineTo(115, 8); g.stroke();
+    placeImage({ src: c.toDataURL('image/png'), fmt: 'png', iw: 120, ih: 40 }, 0.3); return 1; })()`);
+  const sig = await b.evaluate(`(() => { const a = state.selected; return { x: a.x, y: a.y, h: a.h }; })()`);
+  // a real click on the button, in the Signatures section
+  await b.evaluate(`(() => { const s = document.querySelector('details[data-sec="sigs"]'); s.open = true; document.getElementById('btnSigDate').scrollIntoView({ block: 'center' }); return 1; })()`);
+  await sleep(100);
+  await b.click(...await b.at('#btnSigDate'));
+  const d = await b.evaluate(`(() => { const a = state.selected; return a && { type: a.type, text: a.text, x: a.x, y: a.y }; })()`);
+  ok(d && d.type === 'text', 'the date is a text box, selected');
+  eq(d.text, await b.evaluate(`new Date().toLocaleDateString(undefined, { day: 'numeric', month: 'long', year: 'numeric' })`), 'today, written out');
+  ok(/\b20\d\d\b/.test(d.text) && /[A-Za-z]{3,}/.test(d.text), `with the month as a word, so it cannot be misread: ${d.text}`);
+  ok(Math.abs(d.x - sig.x) < 0.01 && d.y > sig.y + sig.h && d.y < sig.y + sig.h + 10, 'just under the signature');
+  const saved = await b.evaluate(exportBase64);
+  ok((await b.evaluate(textOf(saved)))[0].includes(d.text), 'and it is saved');
+});
+
+/* ---------- signatures ---------- */
+
+// A signature drawn in the Sign dialog, with the same pointer events a mouse makes.
+const drawSignature = `(() => {
+  const pad = document.getElementById('sigPad'); pad.setPointerCapture = () => {};
+  const r = pad.getBoundingClientRect(), kx = r.width / pad.width, ky = r.height / pad.height;
+  const P = (t, [x, y]) => new PointerEvent(t, { clientX: r.left + x * kx, clientY: r.top + y * ky, button: 0, buttons: 1, bubbles: true, pointerId: 3 });
+  const pts = []; for (let i = 0; i <= 60; i++) { const t = i / 60; pts.push([80 + t * 420, 110 - 40 * Math.sin(t * Math.PI * 4)]); }
+  pad.dispatchEvent(P('pointerdown', pts[0])); pts.slice(1).forEach(p => pad.dispatchEvent(P('pointermove', p))); pad.dispatchEvent(P('pointerup', pts[pts.length - 1]));
+  return 1; })()`;
+
+test('saved signatures have a place of their own: put one on the page, name it, put it on every page, remove it', async b => {
+  await b.reload();
+  // a signature kept by an older version, as a bare picture, is still there
+  await b.evaluate(`(() => { const c = document.createElement('canvas'); c.width = 120; c.height = 40; const g = c.getContext('2d'); g.strokeStyle = '#123'; g.lineWidth = 3; g.beginPath(); g.moveTo(5, 30); g.lineTo(115, 8); g.stroke();
+    localStorage.setItem('kam-signatures', JSON.stringify([c.toDataURL('image/png')])); return 1; })()`);
+  await b.reload();
+  await b.evaluate(makeDoc(`for (let i = 0; i < 3; i++) doc.addPage([595, 842]);`));
+  await b.waitFor(settled);
+  eq(await b.evaluate(`document.querySelectorAll('#sigList .sig-item').length`), 1, 'the old signature is listed');
+  // draw a new one in the Sign dialog: it is kept, newest first
+  await b.evaluate(`document.getElementById('btnSign').click(); 1`);
+  await b.evaluate(drawSignature);
+  await b.evaluate(`document.getElementById('sigUse').click(); 1`);
+  eq(await b.evaluate(`document.querySelectorAll('#sigList .sig-item').length`), 2, 'the drawn signature joined the list');
+  ok(await b.evaluate(`curAnnots().some(a => a.type === 'image')`), 'and was put on the page');
+  // name it
+  await b.evaluate(`(() => { const i = document.querySelector('#sigList .sig-item .sig-name'); i.value = 'Initials'; i.dispatchEvent(new Event('change')); return 1; })()`);
+  await b.reload();
+  eq(await b.evaluate(`KamSigs.list().map(s => s.name)`), ['Initials', ''], 'its name is kept, through a reload');
+  await b.evaluate(makeDoc(`for (let i = 0; i < 3; i++) doc.addPage([595, 842]);`));
+  await b.waitFor(settled);
+  // a click puts it on the page
+  await b.evaluate(`document.querySelector('#sigList .sig-item .sig-pick').click(); 1`);
+  await b.waitFor(`curAnnots().some(a => a.type === 'image')`, 5000);
+  // every page: once each, at the same place low on the right, and one Ctrl+Z takes them all off
+  await b.evaluate(`document.querySelector('#sigList .sig-item .sig-every').click(); 1`);
+  await b.waitFor(`state.pageIds.every(id => (state.annots[id] || []).some(a => a.type === 'image' && a.x > 400 && a.y > 700))`, 5000);
+  const imgs = await b.evaluate(`state.pageIds.map(id => (state.annots[id] || []).filter(a => a.type === 'image').length)`);
+  eq(imgs, [2, 1, 1], 'on every page, besides the one placed by hand');
+  await b.evaluate(`undo()`);
+  eq(await b.evaluate(`state.pageIds.map(id => (state.annots[id] || []).filter(a => a.type === 'image').length)`), [1, 0, 0], 'one Ctrl+Z takes the every-page copies off');
+  // remove one
+  await b.evaluate(`document.querySelector('#sigList .sig-item .sig-remove').click(); 1`);
+  eq(await b.evaluate(`KamSigs.list().length`), 1, 'removed from this computer');
+});
+
+test('a photo of a signature on paper is cleaned up: the paper goes, the ink stays, the edges are cropped', async b => {
+  await b.reload();
+  const r = await b.evaluate(`(async () => {
+    // a phone photo: off-white paper, lit unevenly (a shadow across one side), a blue signature
+    const c = document.createElement('canvas'); c.width = 1200; c.height = 800; const g = c.getContext('2d');
+    const bg = g.createLinearGradient(0, 0, 1200, 0); bg.addColorStop(0, '#f3efe6'); bg.addColorStop(1, '#a9a49b');
+    g.fillStyle = bg; g.fillRect(0, 0, 1200, 800);
+    g.strokeStyle = '#1d2f7a'; g.lineWidth = 7; g.lineCap = 'round'; g.beginPath();
+    for (let i = 0; i <= 120; i++) { const t = i / 120, x = 300 + t * 600, y = 400 - 90 * Math.sin(t * Math.PI * 5) * (1 - 0.4 * t); i ? g.lineTo(x, y) : g.moveTo(x, y); }
+    g.stroke();
+    const blob = await new Promise(res => c.toBlob(res, 'image/jpeg', 0.9));
+    const src = await KamSigs.fromPicture(new File([blob], 'signature.jpg', { type: 'image/jpeg' }));
+    const im = new Image(); im.src = src; await im.decode();
+    const o = document.createElement('canvas'); o.width = im.naturalWidth; o.height = im.naturalHeight; const og = o.getContext('2d'); og.drawImage(im, 0, 0);
+    const d = og.getImageData(0, 0, o.width, o.height).data, A = (x, y) => d[(y * o.width + x) * 4 + 3];
+    let opaque = 0, blue = 0, total = 0;
+    for (let i = 0; i < d.length; i += 4) { total++; if (d[i + 3] > 200) { opaque++; if (d[i + 2] > d[i] + 20) blue++; } }
+    // and one with nothing on it
+    const e = document.createElement('canvas'); e.width = 400; e.height = 300; const eg = e.getContext('2d'); eg.fillStyle = '#f4f1ea'; eg.fillRect(0, 0, 400, 300);
+    let msg = ''; try { await KamSigs.fromPicture(new File([await new Promise(res => e.toBlob(res, 'image/png'))], 'blank.png', { type: 'image/png' })); } catch (err) { msg = err.message; }
+    return { w: o.width, h: o.height, corners: [A(0, 0), A(o.width - 1, 0), A(0, o.height - 1), A(o.width - 1, o.height - 1)], inkShare: opaque / total, blueShare: blue / Math.max(1, opaque), blankMsg: msg };
+  })()`);
+  ok(r.w < 700 && r.h < 300 && r.w > 560 && r.h > 120, `cropped to the signature: ${r.w} x ${r.h}`);
+  eq(r.corners, [0, 0, 0, 0], 'the paper is see-through, the shadowed side too');
+  ok(r.inkShare > 0.03 && r.inkShare < 0.4, `the ink is kept: ${(r.inkShare * 100).toFixed(1)}% of the picture`);
+  ok(r.blueShare > 0.8, 'in its own blue');
+  ok(/No signature was found/.test(r.blankMsg), 'a picture with nothing on it says so: ' + r.blankMsg);
+});
+
+test('a selected mark can be put on every page, in the same place', async b => {
+  await b.reload();
+  await b.evaluate(makeDoc(`for (let i = 0; i < 3; i++) doc.addPage([595, 842]);`));
+  await b.waitFor(settled);
+  await b.evaluate(`(() => { pushAnnotUndo(curPageId()); const a = { id: uid(), type: 'text', x: 400, y: 790, w: 0, h: 0, rot: 0, text: 'Initialled: KA', size: 12, font: 'Helvetica', bold: false, color: '#111111', opacity: 1 };
+    measureText(a); curAnnots().push(a); state.selected = a; updateProps(); return 1; })()`);
+  ok(await b.evaluate(`getComputedStyle(document.getElementById('btnEveryPage')).display !== 'none'`), 'the button is there with a mark selected');
+  await b.evaluate(`document.getElementById('btnEveryPage').click(); 1`);
+  eq(await b.evaluate(`state.pageIds.map(id => (state.annots[id] || []).filter(a => a.text === 'Initialled: KA').map(a => [a.x, a.y]))`), [[[400, 790]], [[400, 790]], [[400, 790]]], 'on every page, at the same place');
+  await b.evaluate(`undo()`);
+  eq(await b.evaluate(`state.pageIds.map(id => (state.annots[id] || []).length)`), [1, 0, 0], 'and one Ctrl+Z takes the copies off');
+});
+
 test('choosing a tool or selecting a mark never moves the page', async b => {
   await b.reload();
-  await b.evaluate(makeDoc(`doc.addPage([595, 842]).drawText('Some text on the page', { x: 60, y: 760, size: 14, font: f });`));
+  await b.evaluate(makeDoc(`doc.addPage([595, 842]).drawText('Some text on the page', { x: 60, y: 760, size: 14, font: f }); doc.addPage([595, 842]);`));
   await b.waitFor(settled);
   await b.evaluate(`setZoom(1); 1`); await b.waitFor(settled);
   const top = `Math.round(document.getElementById('overlay').getBoundingClientRect().top)`;
@@ -1868,6 +2051,26 @@ test('choosing a tool or selecting a mark never moves the page', async b => {
   eq(await b.evaluate(top), t0, 'nor did clearing it');
   const said = await b.evaluate(`document.getElementById('propsHint').textContent`);
   ok(/colour, size or font/.test(said), 'with nothing selected, the row says what it is for: ' + JSON.stringify(said));
+  // a text box has the most to set (colour, size, font, bold, italic, align, opacity, every page,
+  // delete): selecting one never moves the page either, on a wide screen or a narrow one
+  await b.evaluate(`(() => { pushAnnotUndo(curPageId()); const a = { id: uid(), type: 'text', x: 100, y: 450, w: 0, h: 0, rot: 0, text: 'A note', size: 16, font: 'Helvetica', bold: false, color: '#111111', opacity: 1 };
+    measureText(a); curAnnots().push(a); drawOverlay(); return 1; })()`);
+  try {
+    for (const width of [1400, 1280, 1100, 1040]) {
+      await b.emulate({ width, height: 900, desktop: true });
+      await sleep(150);
+      await b.evaluate(`(() => { state.selected = null; updateProps(); return 1; })()`);
+      const before = await b.evaluate(top);
+      await b.click(...await b.onPage(120, 458));
+      ok(await b.evaluate(`!!state.selected && state.selected.type === 'text'`), `${width}px: the text box is selected`);
+      eq(await b.evaluate(top), before, `${width}px: selecting the text box did not move the page`);
+      const row = await b.evaluate(`(() => { const p = document.getElementById('props'), r = p.getBoundingClientRect(), del = document.getElementById('btnDelAnnot').getBoundingClientRect();
+        return { h: Math.round(r.height), every: getComputedStyle(document.getElementById('btnEveryPage')).display !== 'none', delInView: del.right <= r.right + 1 && del.width > 0, scroll: p.scrollWidth - p.clientWidth }; })()`);
+      ok(row.h <= 36, `${width}px: the row stays one line high, ${row.h}px`);
+      ok(row.every, `${width}px: Every page is offered, with two pages`);
+      ok(row.delInView && row.scroll <= 0, `${width}px: everything fits, Delete in view: ${row.scroll}px over`);
+    }
+  } finally { await b.emulate(null); }
 });
 
 test('a shape just drawn can be restyled straight away, and the next one follows', async b => {
@@ -2449,7 +2652,7 @@ test('document options fold into sections, and unsaved work is marked', async b 
   await b.evaluate(makeDoc(`doc.addPage([420, 300]);`));
   await b.waitFor(settled);
   const openSecs = `[...document.querySelectorAll('details.sec')].filter(d => d.open).map(d => d.dataset.sec)`;
-  eq(await b.evaluate(`document.querySelectorAll('details.sec').length`), 6, 'six sections instead of one long page');
+  eq(await b.evaluate(`document.querySelectorAll('details.sec').length`), 7, 'seven sections instead of one long page');
   eq(await b.evaluate(openSecs), ['export'], 'only Save & export starts open');
 
   // a section you open stays open
@@ -2518,6 +2721,9 @@ test('pages scroll in one column, and only the ones near the window are drawn', 
 
   eq(await b.evaluate(scrollToPageTop(30)), 30, 'scrolling to page 31 makes it the current page');
   eq(await b.evaluate(`document.getElementById('pageNum').value`), '31', 'the page number follows the scrolling');
+  // pages far away are let go once the browser reports them out of view, which on a busy
+  // machine can be a moment after the scrolling stops
+  await b.waitFor(`!(${drawnPages}).includes(0)`, 2000).catch(() => { });
   const mid = await b.evaluate(drawnPages);
   ok(mid.includes(30) && !mid.includes(0), `pages near the window are drawn, far ones let go: ${mid}`);
   ok(mid.length <= 10, `memory stays flat: ${mid.length} pages drawn`);

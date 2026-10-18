@@ -23,11 +23,11 @@ function fontFamily(f) {
     : f === 'Carlito' ? '"KAM Carlito",Carlito,Calibri,sans-serif' : f === 'Caladea' ? '"KAM Caladea",Caladea,Cambria,serif'
     : 'Helvetica,Arial,sans-serif';
 }
-function fontCss(a, s) { needFace(a); return `${a.bold ? 'bold ' : ''}${a.size * s}px ${fontFamily(a.font)}`; }
+function fontCss(a, s) { needFace(a); return `${a.italic ? 'italic ' : ''}${a.bold ? 'bold ' : ''}${a.size * s}px ${fontFamily(a.font)}`; }
 // Load the bundled font a text box asks for; once it is here, measure and draw again with it.
 function needFace(a) {
   if ((a.font !== 'Carlito' && a.font !== 'Caladea') || typeof KamFonts === 'undefined') return;
-  const key = KamFonts.keyFor(a.font, a.bold);
+  const key = KamFonts.keyFor(a.font, a.bold, a.italic);
   if (KamFonts.faceReady(key)) return;
   KamFonts.face(key).then(() => {
     for (const id in state.annots) for (const t of state.annots[id]) if (t.type === 'text' && t.font === a.font) measureText(t);
@@ -58,10 +58,15 @@ function wrapLines(a) {
 function measureText(a) {
   const lines = wrapLines(a); a.lines = lines;
   measureCtx.font = fontCss(a, 1);
-  const natural = Math.max(10, ...lines.map(l => measureCtx.measureText(l || ' ').width));
+  const widths = lines.map(l => measureCtx.measureText(l || ' ').width);
+  const natural = Math.max(10, ...widths);
   a.w = a.boxW ? Math.max(10, a.boxW) : natural;
   a.h = lines.length * a.size * 1.2;
+  // a centred or right-aligned line starts this far in, on screen and in the saved file alike
+  const f = alignShare(a);
+  if (f) a.lineX = lines.map((l, i) => l ? Math.max(0, (a.w - widths[i]) * f) : 0); else delete a.lineX;
 }
+function alignShare(a) { return a.align === 'center' ? 0.5 : a.align === 'right' ? 1 : 0; }
 function getImg(a) {
   const im = imageOf(a), key = a.img || (im && im.src) || '';
   let img = imgCache.get(key);
@@ -108,11 +113,11 @@ function drawSpellMarks(ctx, a, s) {
   ctx.font = fontCss(a, s);
   const lh = a.size * 1.2 * s;
   (a.lines || a.text.split('\n')).forEach((line, i) => {
-    const y = i * lh + a.size * 1.06 * s;
+    const y = i * lh + a.size * 1.06 * s, x0 = (a.lineX ? a.lineX[i] || 0 : 0) * s;
     for (const t of KamSpell.tokens(line)) {
       if (!KamSpell.isMisspelled(t.word)) continue;
-      const x1 = ctx.measureText(line.slice(0, t.start)).width;
-      const x2 = ctx.measureText(line.slice(0, t.end)).width;
+      const x1 = x0 + ctx.measureText(line.slice(0, t.start)).width;
+      const x2 = x0 + ctx.measureText(line.slice(0, t.end)).width;
       ctx.beginPath(); ctx.moveTo(x1, y); ctx.lineTo(x2, y); ctx.stroke();
     }
   });
@@ -135,7 +140,7 @@ function drawAnnot(ctx, a, s, spell, marks) {
     if (a.type === 'text') {
       ctx.fillStyle = a.color; ctx.font = fontCss(a, s); ctx.textBaseline = 'alphabetic'; ctx.fontKerning = 'none';
       const lh = a.size * 1.2 * s;
-      (a.lines || a.text.split('\n')).forEach((line, i) => ctx.fillText(line, 0, i * lh + a.size * 0.9 * s));
+      (a.lines || a.text.split('\n')).forEach((line, i) => ctx.fillText(line, (a.lineX ? a.lineX[i] || 0 : 0) * s, i * lh + a.size * 0.9 * s));
       if (spell) drawSpellMarks(ctx, a, s);
     } else if (a.type === 'rect') {
       if (a.fill) { ctx.fillStyle = a.fill; ctx.fillRect(0, 0, w, h); }
@@ -246,7 +251,7 @@ function coverAt(mx, my) {
 
 /* ---------- tools & properties ---------- */
 const propVis = {
-  select: [], text: ['color', 'size', 'font', 'bold', 'opacity'], pen: ['color', 'width', 'opacity'],
+  select: [], text: ['color', 'size', 'font', 'bold', 'italic', 'align', 'opacity'], pen: ['color', 'width', 'opacity'],
   line: ['color', 'width', 'opacity'], arrow: ['color', 'width', 'opacity'],
   rect: ['color', 'fill', 'width', 'opacity'], ellipse: ['color', 'fill', 'width', 'opacity'],
   highlight: ['color', 'opacity'], whiteout: [], redact: [], image: ['opacity'],
@@ -283,10 +288,10 @@ function updateProps() {
   // that is hidden for this kind of mark never carries a stale value into the defaults
   $('#pColor').value = state.tool === 'highlight' ? defaults.fill : defaults.color;
   $('#pFillOn').checked = defaults.fillOn; $('#pFill').value = defaults.fill; $('#pWidth').value = defaults.width;
-  $('#pSize').value = defaults.size; $('#pFont').value = defaults.font; $('#pBold').checked = defaults.bold;
+  $('#pSize').value = defaults.size; $('#pFont').value = defaults.font; $('#pBold').checked = defaults.bold; $('#pItalic').checked = !!defaults.italic; $('#pAlign').value = defaults.align || 'left';
   if (a) {
     vis = propVis[a.pts ? (a.type === 'pen' ? 'pen' : 'line') : a.redact ? 'redact' : a.type === 'rect' && a.blend ? 'highlight' : a.type === 'rect' && !a.stroke && a.fill === '#ffffff' ? 'whiteout' : a.type] || [];
-    if (a.type === 'text') { $('#pColor').value = a.color; $('#pSize').value = a.size; $('#pFont').value = a.font; $('#pBold').checked = !!a.bold; }
+    if (a.type === 'text') { $('#pColor').value = a.color; $('#pSize').value = a.size; $('#pFont').value = a.font; $('#pBold').checked = !!a.bold; $('#pItalic').checked = !!a.italic; $('#pAlign').value = a.align || 'left'; }
     else if (a.pts) { $('#pColor').value = a.color; $('#pWidth').value = a.width; }
     else if (a.type === 'rect' || a.type === 'ellipse') {
       if (a.blend) { $('#pColor').value = a.fill; }
@@ -295,7 +300,7 @@ function updateProps() {
     $('#pOpacity').value = a.opacity == null ? 1 : a.opacity;
   } else if (editing) {                                 // a text box being typed
     vis = propVis.text; const t = editing;
-    $('#pColor').value = t.color; $('#pSize').value = t.size; $('#pFont').value = t.font; $('#pBold').checked = !!t.bold;
+    $('#pColor').value = t.color; $('#pSize').value = t.size; $('#pFont').value = t.font; $('#pBold').checked = !!t.bold; $('#pItalic').checked = !!t.italic; $('#pAlign').value = t.align || 'left';
     $('#pOpacity').value = t.opacity == null ? 1 : t.opacity;
   } else {
     vis = propVis[state.tool] || [];
@@ -303,6 +308,7 @@ function updateProps() {
   }
   $$('#props label').forEach(l => l.classList.toggle('on', vis.includes(l.dataset.p)));
   $('#btnDelAnnot').style.display = a ? '' : 'none';
+  $('#btnEveryPage').style.display = a && state.pageIds.length > 1 ? '' : 'none';
   const ph = $('#propsHint'), empty = !vis.length && !a;
   ph.textContent = !empty ? '' : typeof KamEdit !== 'undefined' && KamEdit.active()
     ? 'Editing the PDF’s own text, in its own font and size.' : (propsHints[state.tool] || '');
@@ -317,11 +323,11 @@ function onPropChange() {
   const a = state.selected;
   const color = $('#pColor').value, fillOn = $('#pFillOn').checked, fill = $('#pFill').value;
   const width = parseFloat($('#pWidth').value) || 2, size = parseFloat($('#pSize').value) || 16;
-  const font = $('#pFont').value, bold = $('#pBold').checked, opacity = parseFloat($('#pOpacity').value);
+  const font = $('#pFont').value, bold = $('#pBold').checked, italic = $('#pItalic').checked, align = $('#pAlign').value, opacity = parseFloat($('#pOpacity').value);
   if (a) {
     pushAnnotUndo(curPageId());
     a.opacity = opacity;
-    if (a.type === 'text') { a.color = color; a.size = size; a.font = font; a.bold = bold; measureText(a); }
+    if (a.type === 'text') { a.color = color; a.size = size; a.font = font; a.bold = bold; a.italic = italic; a.align = align; measureText(a); }
     else if (a.pts) { a.color = color; a.width = width; }
     else if (a.type === 'rect' || a.type === 'ellipse') {
       if (a.blend) a.fill = color; else { a.stroke = color; a.fill = fillOn ? fill : null; a.width = width; }
@@ -332,18 +338,36 @@ function onPropChange() {
   // the change is also how the next mark will look. Choosing a mark with Select changes only it.
   if (!a || state.tool !== 'select') {
     if (state.tool === 'highlight') { defaults.fill = color; } else { defaults.color = color; defaults.fill = fill; }
-    defaults.fillOn = fillOn; defaults.width = width; defaults.size = size; defaults.font = font; defaults.bold = bold; defaults.opacity = opacity;
+    defaults.fillOn = fillOn; defaults.width = width; defaults.size = size; defaults.font = font; defaults.bold = bold; defaults.italic = italic; defaults.align = align; defaults.opacity = opacity;
   }
   if (editing) {
-    editing.color = color; editing.size = size; editing.font = font; editing.bold = bold; editing.opacity = opacity;
+    editing.color = color; editing.size = size; editing.font = font; editing.bold = bold; editing.italic = italic; editing.align = align; editing.opacity = opacity;
     positionTextEditor(); drawOverlay();
   }
 }
-['#pColor', '#pFillOn', '#pFill', '#pWidth', '#pSize', '#pFont', '#pBold', '#pOpacity'].forEach(s => $(s).addEventListener('input', onPropChange));
+['#pColor', '#pFillOn', '#pFill', '#pWidth', '#pSize', '#pFont', '#pBold', '#pItalic', '#pAlign', '#pOpacity'].forEach(s => $(s).addEventListener('input', onPropChange));
 // Once a colour, size or font has been chosen for the text box being typed, go back to the
 // text, with the caret where it was. (A number being typed is left alone until Enter.)
 $('#props').addEventListener('change', () => { if (editing) refocusTextEditor(); });
 $('#btnDelAnnot').onclick = deleteSelected;
+/* The selected mark, copied to the same place on every other page: initials, a stamp, a
+   footer note. One Ctrl+Z takes all the copies off again. */
+$('#btnEveryPage').onclick = () => {
+  const a = state.selected; if (!a || state.pageIds.length < 2) return;
+  const from = curPageId();
+  pushUndo(snapshotAnnots(state.pageIds));
+  let n = 0;
+  state.pageIds.forEach((pid, k) => {
+    if (pid === from) return;
+    const b = JSON.parse(JSON.stringify(a)); b.id = uid(); delete b._editing;
+    const sz = KamView.size(k) || state.pageSize;
+    if (b.pts) { const dx = Math.min(0, sz.w - Math.max(...b.pts.map(p => p[0]))), dy = Math.min(0, sz.h - Math.max(...b.pts.map(p => p[1]))); b.pts = b.pts.map(p => [p[0] + dx, p[1] + dy]); }
+    else { b.x = Math.max(0, Math.min(b.x, sz.w - (b.w || 0))); b.y = Math.max(0, Math.min(b.y, sz.h - (b.h || 0))); }
+    (state.annots[pid] || (state.annots[pid] = [])).push(b); n++;
+  });
+  drawOverlay(); state.pageIds.forEach((_, k) => refreshThumb(k));
+  toast(`Copied to the other ${n} page${n === 1 ? '' : 's'}, in the same place. Ctrl+Z takes the copies off.`, 5000);
+};
 function deleteSelected() {
   const a = state.selected; if (!a) return;
   pushAnnotUndo(curPageId());
@@ -487,7 +511,7 @@ function endDrag(e) {
     const [sx, sy] = drag.start, [cx, cy] = drag.cur; drag = null;
     const wBox = Math.abs(cx - sx), fixed = wBox > 25;
     pushAnnotUndo(curPageId());
-    const a = { id: uid(), type: 'text', x: fixed ? Math.min(sx, cx) : sx, y: fixed ? Math.min(sy, cy) : sy - defaults.size * 0.6, w: 0, h: 0, rot: 0, text: '', size: defaults.size, font: defaults.font, bold: defaults.bold, color: defaults.color, opacity: defaults.opacity, boxW: fixed ? wBox : 0 };
+    const a = { id: uid(), type: 'text', x: fixed ? Math.min(sx, cx) : sx, y: fixed ? Math.min(sy, cy) : sy - defaults.size * 0.6, w: 0, h: 0, rot: 0, text: '', size: defaults.size, font: defaults.font, bold: defaults.bold, italic: !!defaults.italic, align: defaults.align || 'left', color: defaults.color, opacity: defaults.opacity, boxW: fixed ? wBox : 0 };
     measureText(a); curAnnots().push(a); drawOverlay(); startTextEdit(a); return;
   }
   const a = drag.a, list = curAnnots();
@@ -516,7 +540,7 @@ pagesEl.addEventListener('dblclick', async e => {
   if (!coverAt(x, y) && typeof pdfTextEditAt === 'function' && await pdfTextEditAt(x, y)) return;
   pushAnnotUndo(curPageId());
   const a = { id: uid(), type: 'text', x, y: y - defaults.size * 0.6, w: 0, h: 0, rot: 0, text: '',
-              size: defaults.size, font: defaults.font, bold: defaults.bold, color: defaults.color, opacity: defaults.opacity };
+              size: defaults.size, font: defaults.font, bold: defaults.bold, italic: !!defaults.italic, align: defaults.align || 'left', color: defaults.color, opacity: defaults.opacity };
   measureText(a); curAnnots().push(a); drawOverlay(); startTextEdit(a);
 });
 
@@ -530,7 +554,7 @@ function startTextEdit(a) {
   ed.value = a.text; ed.style.display = 'block';
   positionTextEditor(); drawOverlay(); updateProps();
   $$('#props label').forEach(l => l.classList.toggle('on', propVis.text.includes(l.dataset.p)));
-  $('#pColor').value = a.color; $('#pSize').value = a.size; $('#pFont').value = a.font; $('#pBold').checked = !!a.bold; $('#pOpacity').value = a.opacity;
+  $('#pColor').value = a.color; $('#pSize').value = a.size; $('#pFont').value = a.font; $('#pBold').checked = !!a.bold; $('#pItalic').checked = !!a.italic; $('#pAlign').value = a.align || 'left'; $('#pOpacity').value = a.opacity;
   const focusEd = () => { ed.focus(); ed.setSelectionRange(ed.value.length, ed.value.length); };
   focusEd(); setTimeout(focusEd, 0);
 }
@@ -540,9 +564,13 @@ function positionTextEditor() {
   measureText(a);
   ed.style.left = a.x * z + 'px'; ed.style.top = a.y * z + 'px';
   ed.style.font = fontCss(a, z); ed.style.color = a.color; ed.style.opacity = a.opacity;
-  ed.style.transform = `rotate(${a.rot}deg)`;
+  // the box has a little room to spare for the next letter; for centred or right-aligned text it
+  // is shared out on both sides, or the left, so the words stay where the page draws them
+  const wPx = a.boxW ? a.boxW * z + 3 : a.w * z + 12, f = alignShare(a);
+  ed.style.transform = `rotate(${a.rot}deg)` + (f ? ` translateX(${-(wPx - a.w * z) * f}px)` : '');
+  ed.style.textAlign = a.align || 'left';
   ed.style.whiteSpace = a.boxW ? 'pre-wrap' : 'pre';
-  ed.style.width = (a.boxW ? a.boxW * z + 3 : a.w * z + 12) + 'px'; ed.style.height = (a.h * z + 3) + 'px';
+  ed.style.width = wPx + 'px'; ed.style.height = (a.h * z + 3) + 'px';
 }
 ed.addEventListener('input', () => { if (!editing) return; editing.text = ed.value; positionTextEditor(); });
 ed.addEventListener('keydown', e => {
@@ -583,7 +611,7 @@ function commitTextEdit(select) {
 // file is saved: the screen can borrow any font the computer has, the saved file cannot.
 function warnUnsaveable(a) {
   if (typeof KamFonts === 'undefined' || !/[^ -~\s]/.test(a.text)) return;
-  KamFonts.unsaveable(a.font, a.bold, a.text).then(lost => {
+  KamFonts.unsaveable(a.font, a.bold, a.text, a.italic).then(lost => {
     if (lost.length) toast(`${lost.join(' ')} cannot be saved in this font, so ${lost.length === 1 ? 'it' : 'they'} will be left out of the saved file.`, 6000);
   }).catch(() => { });
 }
@@ -656,17 +684,9 @@ $('#imgAnnotInput').addEventListener('change', async e => {
 });
 /* Signatures you keep, so you draw yours once rather than every time. Stored on this
    computer only, in the browser's own storage. */
-function savedSignatures() {
-  try { return JSON.parse(localStorage.getItem('kam-signatures') || '[]'); } catch (e) { return []; }
-}
-function storeSignature(src) {
-  const all = savedSignatures().filter(s => s !== src);
-  all.unshift(src);
-  try { localStorage.setItem('kam-signatures', JSON.stringify(all.slice(0, 6))); } catch (e) { toast('Could not save the signature (storage full)'); }
-}
-function forgetSignature(src) {
-  try { localStorage.setItem('kam-signatures', JSON.stringify(savedSignatures().filter(s => s !== src))); } catch (e) { }
-}
+function savedSignatures() { return KamSigs.list().map(s => s.src); }
+function storeSignature(src) { KamSigs.add(src); }
+function forgetSignature(src) { KamSigs.removeSrc(src); }
 $('#btnSign').onclick = () => {
   if (!state.doc) return toast('Open a PDF first');
   const saved = savedSignatures();
@@ -679,7 +699,9 @@ $('#btnSign').onclick = () => {
     <canvas id="sigPad" width="600" height="220"></canvas>
     <div class="row" style="margin-top:10px"><label>Color <input type="color" id="sigColor" value="#1e3a8a"></label>
     <button id="sigClear">Clear</button><label><input type="checkbox" id="sigKeep" checked> Remember this signature</label>
-    <span style="flex:1"></span><button id="sigCancel">Cancel</button><button id="sigUse" class="primary">Use signature</button></div>`);
+    <span style="flex:1"></span><button id="sigCancel">Cancel</button><button id="sigUse" class="primary">Use signature</button></div>
+    <div class="row" style="margin-top:4px"><button id="sigPicture"><svg class="ic" aria-hidden="true"><use href="#i-image"/></svg> Use a picture of your signature instead</button></div>`);
+  $('#sigPicture').onclick = () => { hideModal(); KamSigs.pictureThenPlace(); };
   $$('#modalBox .sig-card img').forEach(img => img.onclick = async () => {
     const src = savedSignatures()[+img.dataset.i]; if (!src) return;
     const probe = new Image(); probe.src = src;
@@ -795,7 +817,7 @@ document.addEventListener('paste', async e => {
     const cx = typeof visibleCentre === 'function' ? visibleCentre() : [W / 2, H / 2];
     pushAnnotUndo(curPageId());
     const a = { id: uid(), type: 'text', x: 0, y: 0, w: 0, h: 0, rot: 0, text: text.replace(/\r\n?/g, '\n').slice(0, 5000),
-                size: defaults.size, font: defaults.font, bold: defaults.bold, color: defaults.color, opacity: defaults.opacity };
+                size: defaults.size, font: defaults.font, bold: defaults.bold, italic: !!defaults.italic, align: defaults.align || 'left', color: defaults.color, opacity: defaults.opacity };
     measureText(a);
     if (a.w > W * 0.8) { a.boxW = W * 0.8; measureText(a); }
     a.x = Math.max(4, Math.min(W - a.w - 4, cx[0] - a.w / 2)); a.y = Math.max(4, Math.min(H - a.h - 4, cx[1] - a.h / 2));
