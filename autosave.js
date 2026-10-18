@@ -97,7 +97,7 @@ const KamDraft = (() => {
       const used = new Set(); for (const list of annots) for (const a of list) if (a.img) used.add(a.img);
       const images = {}; for (const id of used) if (state.images[id]) images[id] = state.images[id];
       okd = await KamDraft.save({ bytes: state.bytes, images, imagesSig: [...used].sort().join(','),
-        record: { fileName: state.fileName, annots, ocr, cur: state.cur, savedAt: Date.now(), v: 2 } });
+        record: { fileName: state.fileName, annots, ocr, cur: state.cur, savedAt: Date.now(), dirty: !!state.dirty, v: 2 } });
       if (okd) { lastSaved = Date.now(); setState('Working copy kept ' + when(lastSaved)); }
     } catch (e) { console.warn('could not keep a working copy', e); }
     saving = false;
@@ -151,6 +151,9 @@ const KamDraft = (() => {
       b.onclick = async () => { if (await keepOrDiscard('restore your last session')) restore(draft); };
     });
   }
+
+  // for launch.js, which asks before a PDF opened from Windows replaces unsaved work
+  KamDraft.restoreKept = async () => { const d = await KamDraft.get(); if (d) await restore(d); };
 
   if (cb) cb.addEventListener('change', () => {
     on = cb.checked;

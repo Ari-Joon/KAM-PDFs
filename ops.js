@@ -78,7 +78,7 @@ function moveNow(from, to) {
 async function movePage(from, to) {
   await structOp(async () => moveNow(from, to), { undo: () => ({ kind: 'move', from: to, to: from, cur: state.cur }) });
 }
-$$('.side-actions button').forEach(b => b.onclick = () => {
+$$('.side-actions button').forEach(b => b.onclick = async () => {
   if (!state.doc) return toast('Open a PDF first');
   const pages = targetPages();
   switch (b.dataset.act) {
@@ -87,7 +87,16 @@ $$('.side-actions button').forEach(b => b.onclick = () => {
     case 'dup': return duplicatePages(pages);
     case 'blank': return insertBlankAfter(pages[pages.length - 1]);
     case 'extract': return extractPages(pages);
-    case 'del': if (confirm(`Delete ${pages.length} page(s)?`)) return deletePages(pages);
+    case 'del': {
+      const n = pages.length;
+      if (n >= state.pageIds.length) return toast('A PDF needs at least one page. Add one before deleting this.', 4000);
+      const c = await choose({
+        title: n === 1 ? `Delete page ${pages[0] + 1}?` : `Delete ${n} pages?`, message: `Ctrl+Z brings ${n === 1 ? 'it' : 'them'} back.`,
+        buttons: [{ key: 'del', label: 'Delete', primary: true }, { key: 'cancel', label: 'Cancel' }],
+      });
+      if (c === 'del') return deletePages(pages);
+      return;
+    }
   }
 });
 
@@ -207,7 +216,7 @@ async function extractPages(indices) {
     const pages = await out.copyPages(burned, indices);
     pages.forEach(p => out.addPage(p));
     downloadBytes(await out.save(), outName('-pages-' + indices.map(i => i + 1).join('_').slice(0, 40)));
-    toast(`Extracted ${indices.length} page(s)`);
+    toast(`Extracted ${indices.length} page${indices.length === 1 ? '' : 's'}`);
   } catch (e) { console.error(e); toast('Extract failed: ' + e.message); }
   busy(false);
 }
@@ -613,11 +622,22 @@ async function exportBytes() {
    "document-edited (3).pdf" and no idea which one is current. */
 let saveTarget = null;
 window.resetSaveTarget = () => { saveTarget = null; };
+// A PDF opened from Windows comes with the file itself (launch.js), and Save writes back into it.
+window.setSaveTarget = h => { saveTarget = h; };
 async function savePdf(saveAs) {
   if (!state.doc) return toast('Open a PDF first');
   commitTextEdit();
   const canPick = typeof window.showSaveFilePicker === 'function';
   let handle = saveAs ? null : saveTarget;
+  // The browser asks, once, whether KAM PDFs may change that file. This has to happen now,
+  // while the click that asked for the save still counts, not after the PDF has been built.
+  if (handle && typeof handle.queryPermission === 'function') {
+    try {
+      let p = await handle.queryPermission({ mode: 'readwrite' });
+      if (p !== 'granted') p = await handle.requestPermission({ mode: 'readwrite' });
+      if (p !== 'granted') handle = null;              // said no: ask where to save a copy instead
+    } catch (e) { console.warn(e); handle = null; }
+  }
   try {
     if (canPick && !handle) {
       handle = await window.showSaveFilePicker({
@@ -629,17 +649,31 @@ async function savePdf(saveAs) {
   busy(true);
   try {
     const bytes = await exportBytes();
+    let wrote = false;
     if (handle) {
-      const w = await handle.createWritable();
-      await w.write(bytes); await w.close();
+      try {
+        const w = await handle.createWritable();
+        await w.write(bytes); await w.close();
+        wrote = true;
+      } catch (e) {
+        // a file that cannot be written (read-only, or on a drive that went away): keep the work
+        // as a copy rather than lose it
+        console.warn(e);
+        downloadBytes(bytes, outName()); state.savedRev = state.rev; state.dirty = false;
+        toast(`Could not save over ${handle.name}, so the changes were saved as ${outName()} in your downloads.`, 7000);
+      }
+    }
+    if (wrote) {
       saveTarget = handle; state.savedRev = state.rev; state.dirty = false;
       toast('Saved ' + handle.name);
-    } else {
+    } else if (!handle) {
       downloadBytes(bytes, outName()); state.savedRev = state.rev; state.dirty = false;
       toast('Saved ' + outName());
     }
   } catch (e) { console.error(e); toast('Save failed: ' + e.message, 6000); }
   busy(false);
+  // the working copy learns the work is saved, so it is not offered back as unsaved later
+  if (!state.dirty && typeof saveDraftNow === 'function') saveDraftNow();
 }
 $('#btnSave').onclick = $('#btnSave2').onclick = () => savePdf(false);
 $('#btnSaveAs').onclick = () => savePdf(true);

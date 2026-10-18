@@ -83,7 +83,7 @@ const KamEdit = (() => {
     blink = setInterval(() => { if (!S) return; S.caretOn = !S.caretOn; redraw(); }, 530);
     KamView.invalidate(pi);                    // the page underneath, redrawn without this line
     drawOverlay();
-    if (typeof touchGrab === 'function') touchGrab();
+    if (typeof updateProps === 'function') updateProps();          // the property row says what this is
     $('#hint').textContent = 'Editing in the page’s own font. Enter or Esc to finish.';
     return true;
   }

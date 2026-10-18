@@ -16,7 +16,7 @@ anything fails, so it works as a pre-commit or CI check.
 
 ## What it covers
 
-Sixty-nine tests, grouped here by what they protect.
+Seventy-six tests, grouped here by what they protect.
 
 **Editing the PDF's own text**
 
@@ -38,6 +38,23 @@ Sixty-nine tests, grouped here by what they protect.
 | selecting text | reading order, multi-line selection, copy, delete |
 | find | matches across pages, in order |
 | search highlight position | the highlight starts and ends on the word it found, checked against the exact glyph widths pdf-lib knows for the standard fonts |
+
+**Your own marks, with the real mouse and keyboard**
+
+| Test | Checks |
+|---|---|
+| a text box's look | the size, font and bold chosen while typing go to that box and the typing carries on in it; Esc leaves it selected so it can still be changed; double-clicking it edits it instead of starting a new box; the saved file has it in that font |
+| the page stays still | no tool and no selection moves the page under the mouse (the property row keeps its place) |
+| a shape just drawn | is selected, takes the colour and width chosen straight after, and the next one is drawn the same way |
+| Ctrl+S in a text box | saves, with what was just typed in it |
+
+**Opening PDFs from Windows**
+
+| Test | Checks |
+|---|---|
+| the installed app | a PDF handed over by the browser opens straight away, and Save writes back into that very file without asking where; Save As still asks |
+| unsaved work from last time | is offered back before a PDF opened from Windows could replace it, and is not asked about once it was saved |
+| a copy run from a folder | `setup/open-pdf.ps1` hands the PDF over byte for byte (a name with accents included), the folder copy opens it and forgets the address, and an address pointing anywhere else loads nothing |
 
 **Saving what you see**
 
@@ -157,6 +174,17 @@ pip install pypdfium2 pillow
 Without them that one assertion is skipped and reported as skipped, not silently passed.
 
 ## Notes
+
+- Some tests use real mouse and keyboard input (the DevTools Input domain) rather than events
+  made inside the page. Only real input moves the focus the way a person does, and that is where
+  the text box bug lived: clicking the Size field took the focus out of the box, which closed it,
+  and the new size went to the next box instead. Events dispatched by script never move the
+  focus, so the old tests could not see it. Two side effects are handled by the harness: real
+  input lets a page with unsaved work ask "Leave site?" on reload (the harness answers it), and a
+  real click on a dropdown would open the browser's own popup (those tests move the focus instead).
+- A page that stops answering fails its test after 90 seconds, rather than stopping the run. The
+  first time the Windows tests ran after the others, the app was rightly asking whether to restore
+  work an earlier test had left, and nothing was there to answer.
 
 - The clipboard is unavailable to headless Chrome, so the copy test stubs the clipboard API
   and asserts the right text was handed to it.

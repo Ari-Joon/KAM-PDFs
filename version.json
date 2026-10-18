@@ -1,5 +1,5 @@
 {
-  "version": "2.0.0",
-  "notes": "edit a PDF's own text in its own font, one long scroll of pages, locked PDFs, links and bookmarks, and phones and tablets",
+  "version": "2.1.0",
+  "notes": "open PDFs straight from Windows with Open with, text boxes that take the size and font you choose while you type, and a page that no longer jumps",
   "url": "https://github.com/Ari-Joon/KAM-PDFs/releases/latest"
 }

@@ -172,7 +172,7 @@ body.resizing #sidebar,body.resizing #rightpanel{transition:none}
 #toolbar .sep{display:none}
 #tools{display:flex;flex-wrap:wrap;gap:6px}
 #tools button{padding:5px 9px}
-#props{display:flex;align-items:center;gap:8px 12px;flex-wrap:wrap;min-height:26px}
+#props{display:flex;align-items:center;gap:8px 12px;flex-wrap:wrap;min-height:30px}
 #props label{display:none;align-items:center;gap:5px;font-size:12px;color:var(--muted)}
 #props label.on{display:flex}
 #props input[type=number]{width:58px}
@@ -311,7 +311,11 @@ kbd{background:var(--kbd);border:1px solid var(--border);border-radius:4px;paddi
   #tools button{font-size:0;gap:0;padding:8px 11px;flex:none}
   #tools .ic-caret,.tsep{display:none}
   #tools .menu{position:fixed;top:auto;left:8px;right:8px;min-width:0}
-  #props{gap:6px 10px}
+  /* one row that scrolls sideways, like the tools above it: a row that wrapped would change
+     height with whatever is selected, and move the page each time */
+  #props{gap:6px 10px;flex-wrap:nowrap;overflow-x:auto;overscroll-behavior-x:contain;scrollbar-width:none;margin:0 -8px;padding:0 8px}
+  #props::-webkit-scrollbar{display:none}
+  #props label,#props button{flex:none}
   .status-hint{display:none}
   #pager{display:flex;justify-content:space-between;gap:8px;padding:4px 8px}
   .fit-label{display:none}
@@ -352,7 +356,8 @@ body.no-doc .tabs button:not([data-tab="help"]){display:none}
 
 #tools{align-items:center}
 .tsep{width:1px;height:22px;background:var(--border);margin:0 3px;flex:none}
-#props:not(:has(label.on)):not(:has(#btnDelAnnot:not([style*="none"]))){display:none}
+#propsHint{display:none;font-size:12px;color:var(--muted);min-width:0;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+#propsHint.on{display:block}
 
 .status-hint{min-width:0;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
 #hint{font-size:12px}
@@ -570,6 +575,7 @@ details.tip>div{padding:0 2px 11px;line-height:1.55}
       </div>
       <div class="sep"></div>
       <div id="props">
+        <span id="propsHint"></span>
         <label data-p="color">Color <input type="color" id="pColor" value="#e11d48"></label>
         <label data-p="fill">Fill <input type="checkbox" id="pFillOn"> <input type="color" id="pFill" value="#ffff00"></label>
         <label data-p="width">Width <input type="number" id="pWidth" min="0.5" max="50" step="0.5" value="2"></label>
@@ -724,7 +730,8 @@ details.tip>div{padding:0 2px 11px;line-height:1.55}
       </div>
       <h4>How do I…</h4>
       <details class="tip"><summary>Edit text that is already in the PDF</summary><div class="muted">With <b>Select</b> chosen, hover over any text in the PDF and it lights up. Double-click a line to retype it where it is, in the PDF's own font, size and colour; the rest of the line moves along as you type, keeping its alignment. <kbd>Enter</kbd> or <kbd>Esc</kbd> finishes. What you see is exactly what is saved.</div></details>
-      <details class="tip"><summary>Add your own text</summary><div class="muted">Choose <b>Text</b>, then click to place it, or drag out a box first so the words wrap to fit. Double-click it later to change it. Paste an image from the clipboard with Ctrl+V.</div></details>
+      <details class="tip"><summary>Open PDFs straight from Windows</summary><div class="muted">Right-click a PDF and choose <b>Open with › KAM PDFs</b>. To make KAM PDFs the app for every PDF, choose <b>Open with › Choose another app</b>, pick KAM PDFs and tick <b>Always</b>. In KAM PDFs installed from the website, <b>Save</b> then puts your changes straight back into that file (the browser asks you once), and <b>Save As</b> makes a copy.</div></details>
+      <details class="tip"><summary>Add your own text</summary><div class="muted">Choose <b>Text</b>, then click to place it, or drag out a box first so the words wrap to fit. While you type, the colour, size, font and Bold controls change that box. Double-click it later to type in it again, or click it once to change how it looks. Paste an image from the clipboard with Ctrl+V.</div></details>
       <details class="tip"><summary>Delete text from the PDF</summary><div class="muted">Click a line of the PDF's own text and press Delete. The words are taken out of the page itself, and nothing around them moves; <kbd>Ctrl+Z</kbd> brings them back. A few lines, such as Arabic or Hebrew, are redacted instead: those show a red hatch on screen only, and clicking the hatch and pressing Delete again brings the words back.</div></details>
       <details class="tip"><summary>Sign a document</summary><div class="muted">Choose <b>Sign</b>, draw your signature once, and place it on the page. It is kept on this computer, so next time you pick it from the gallery instead of drawing it again.</div></details>
       <details class="tip"><summary>Whiteout or Redact?</summary><div class="muted"><b>Whiteout</b> covers things visually, but the words are still in the file and can be copied out. <b>Redact</b> removes them: when you save, that page is rebuilt from a picture of itself, so the hidden words are gone for good.</div></details>
@@ -785,5 +792,6 @@ details.tip>div{padding:0 2px 11px;line-height:1.55}
 <script src="palette.js"></script>
 <script src="scan-desktop.js"></script>
 <script src="sw-register.js"></script>
+<script src="launch.js"></script>
 </body>
 </html>

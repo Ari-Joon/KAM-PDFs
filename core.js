@@ -5,7 +5,7 @@ pdfjsLib.GlobalWorkerOptions.workerSrc = 'lib/pdf.worker.min.js';
 
 /* Bumped with each release, and shown in the Help tab. Because it lives in the code that
    is actually running, it tells you which version you have rather than which is newest. */
-const KAM_VERSION = '2.0.0';
+const KAM_VERSION = '2.1.0';
 
 const $ = s => document.querySelector(s);
 const $$ = s => [...document.querySelectorAll(s)];
@@ -162,7 +162,7 @@ async function openBytes(bytes, name) {
     loadFormFields(); loadMetadata();
     if (locked === 'user') toast(`Unlocked ${state.fileName}. The copy you save will open without a password.`, 6000);
     else if (locked === 'owner') toast(`${state.fileName} was protected against changes. It opens for editing here, and the copy you save is not protected.`, 7000);
-    else toast(`Opened ${state.fileName} (${doc.getPageCount()} pages)`);
+    else { const n = doc.getPageCount(); toast(`Opened ${state.fileName} (${n} page${n === 1 ? '' : 's'})`); }
   } catch (e) {
     if (e && e.cancelled) toast(`${name || 'The PDF'} was not opened: it needs its password.`, 5000);
     else { console.error(e); toast('Could not open PDF: ' + e.message, 6000); }
@@ -434,7 +434,15 @@ async function applyUpdate() {
   if (state.doc && state.dirty) {
     let kept = false;
     if (typeof saveDraftNow === 'function') { try { kept = await saveDraftNow(); } catch (e) { } }
-    if (!kept && !confirm('Updating reloads KAM PDFs, and this document has changes that are not saved.\n\nSave the PDF first, or press OK to update anyway.')) return;
+    if (!kept) {
+      const c = await choose({
+        title: 'Update with unsaved changes?',
+        message: 'Updating restarts KAM PDFs, and this document has changes that are not saved.',
+        buttons: [{ key: 'save', label: 'Save first', primary: true }, { key: 'update', label: 'Update anyway' }, { key: 'cancel', label: 'Cancel' }],
+      });
+      if (c === 'save') { await savePdf(false); if (state.dirty) return; }
+      else if (c !== 'update') return;
+    }
   }
   if (b) { b.disabled = true; b.textContent = 'Updating…'; }
   setUpdateButton('updating');

@@ -7,7 +7,7 @@
 <p align="center"><b>A free PDF editor and document scanner that just works. No account, no subscription, no upload. Runs on your computer, even offline.</b></p>
 
 <p align="center">
-  <a href="#new-in-20">New in 2.0</a> ·
+  <a href="#new-in-21">What's new</a> ·
   <a href="#download">Download</a> ·
   <a href="#what-it-does">Features</a> ·
   <a href="#scan-with-your-phone">Scanner</a> ·
@@ -29,6 +29,14 @@ That is a scam dressed up as software, and I got sick of it. So I built KAM PDFs
 
 It stays that way. The code is MIT licensed, so it is yours to use, copy, and share with anyone. If someone ever tries to charge you for KAM PDFs, they are not me.
 
+## New in 2.1
+
+- **Open PDFs straight from Windows.** Right-click a PDF and choose **Open with › KAM PDFs**, or make KAM PDFs the app for all your PDFs. In the app installed from the website, **Save** puts your changes straight back into the file you opened.
+- **Text boxes take the colour, size and font you choose while you type.** Double-click one of your text boxes to type in it again, rather than starting a new box on top of it.
+- **A shape you have just drawn stays selected**, so you can change its colour or line width straight away, and the next one is drawn the same way.
+- **The page stays still.** Selecting something or picking a tool no longer moves the page under the mouse.
+- Ctrl+S, Ctrl+P, Ctrl+F and Ctrl+K work from inside a text box.
+
 ## New in 2.0
 
 - **Edit a PDF's own text in its own font.** Double-click a line and retype it right where it is. The letters are the document's own, so the line looks exactly as it did, just with your words. Deleting text removes it from the file instead of covering it up.
@@ -47,7 +55,7 @@ The [release notes](../../releases/latest) have the full list.
 2. Double-click **`Install KAM PDFs.bat`**.
 3. That's it. A **KAM PDFs** icon appears on your Desktop and in the Start Menu. It opens the editor in its own window, like any other app.
 
-The installer only creates two shortcuts. To remove them, run `Remove shortcuts.bat`. Nothing else is written to your system.
+The installer creates two shortcuts and adds KAM PDFs to **Open with** for PDF files, for your Windows account only (no administrator rights). To remove all of it, run `Remove shortcuts.bat`. Nothing else is written to your system.
 
 If you have also installed KAM PDFs from the website (see below), the installer notices and points the shortcut at that instead, so you get the sharp taskbar icon and only one Desktop icon. Installed the app after running the installer? Just run it again.
 
@@ -55,13 +63,19 @@ If you have also installed KAM PDFs from the website (see below), the installer 
 
 ### Install from the website (best icon, works offline too)
 
-Open **https://ari-joon.github.io/KAM-PDFs/** in Chrome or Edge and click **⬇ Install app** in the top right (or the install icon in the address bar). You get a proper app with its own window, a sharp taskbar icon, and a Start Menu entry. The whole app is cached on your computer, so it keeps working with no internet.
+Open **https://ari-joon.github.io/KAM-PDFs/** in Chrome or Edge and click **⬇ Install app** in the top right (or the install icon in the address bar). You get a proper app with its own window, a sharp taskbar icon, a Start Menu entry, and **Open with › KAM PDFs** on every PDF. The whole app is cached on your computer, so it keeps working with no internet.
 
 ### Mac, Linux, or no install
 
 Unzip and open `index.html` in Chrome, Edge, Firefox, or Safari. Everything works the same. You can also use it straight from the browser at the link above.
 
 ## What it does
+
+**Open PDFs from Windows**
+- Right-click any PDF in File Explorer and choose **Open with › KAM PDFs**, and it opens straight away
+- To make KAM PDFs the app for every PDF: **Open with › Choose another app**, pick KAM PDFs and tick **Always**. (Windows only lets you choose that yourself, so no app can make itself the default behind your back.) A copy installed from the zip is also listed in Settings › Apps › Default apps
+- In the app installed from the website, **Save** puts your changes straight back into the file you opened (the browser asks your permission once), and **Save As** makes a copy somewhere else
+- If you left unsaved work last time, KAM PDFs asks before a file you open from Windows could replace it
 
 **Easy to find your way around**
 - Opens to a simple question, *what would you like to do?*, with four answers: edit or sign a PDF, combine PDFs, turn photos into a PDF, or scan a document. Nothing else is on screen until there is a document to work on
@@ -111,7 +125,8 @@ Unzip and open `index.html` in Chrome, Edge, Firefox, or Safari. Everything work
 - OCR reads the words off a scanned page and adds them to the saved PDF as an invisible layer, so the scan becomes searchable. It runs on your computer, like everything else
 
 **Annotate**
-- Text in Helvetica, Times, Courier, Carlito (a free twin of Calibri) or Caladea (Cambria's twin), bold, any size and colour
+- Text in Helvetica, Times, Courier, Carlito (a free twin of Calibri) or Caladea (Cambria's twin), bold, any size and colour. Change any of it while you type, or later by clicking the box once
+- A shape you have just drawn stays selected, so its colour and line width can be changed straight away; the next one is drawn the same way
 - Type in any language: letters outside the basic Western set, such as Polish, Greek or Russian, are saved with a bundled font so they come out right in the file
 - Freehand pen, lines, arrows, rectangles, ellipses
 - Highlighter and whiteout
@@ -277,6 +292,7 @@ textedit.js             the in-place line editor (the caret, selection and keybo
 fonts/                  Liberation, Carlito and Caladea (loaded when a letter needs them)
 crypt.js                opening password-protected PDFs (RC4, AES-128, AES-256)
 links.js                links in the PDF, and the Bookmarks list
+launch.js               opening a PDF straight from Windows ("Open with")
 lib/                    pdf.js, pdf-lib, fontkit, peerjs, qrcode (all bundled)
 lib/ocr/                Tesseract and its English data (loaded on first use)
 pdftext.js              index of the PDF's own text: positions, lines, search
@@ -304,7 +320,8 @@ logo-mark.svg           the logo with the wordmark dropped, for small sizes
 setup/build-icons.js    redraws every icon and the .ico from the two SVGs
 setup/build-assets.js   packs the fonts and the dictionary as scripts
 setup/build-release.js  checks every file is in place and builds the Windows zip
-setup/install.ps1       creates the Desktop and Start Menu shortcuts
+setup/install.ps1       creates the Desktop and Start Menu shortcuts, and "Open with" for PDFs
+setup/open-pdf.ps1      hands a PDF from Windows to a copy run from a folder
 Install KAM PDFs.bat    double-click installer (Windows)
 tests/run.js            the test suite: node tests/run.js
 ```
@@ -317,6 +334,7 @@ tests/run.js            the test suite: node tests/run.js
 - Whiteout **hides** what is under it, it does not delete it: the words can still be extracted from the file. Use **Redact** when something must actually be gone. The test suite asserts both behaviours so neither can drift.
 - A redacted page is rebuilt as an image, so it looks slightly softer at high zoom and the file gets bigger. Every word that was not redacted is put back as invisible text, so the page stays searchable. Other pages are untouched.
 - The copy you save of a password-protected PDF has no password. KAM PDFs can't add one yet.
+- A copy run from a folder can open a PDF from Windows, but cannot write back into it: the first Save asks where to put the edited copy. (The app installed from the website can, because the browser hands it the file itself.)
 - Covering a form field flattens the form when you save, because PDF viewers always paint fields on top of the page. Fields you don't draw over stay editable.
 
 ## Tests
@@ -325,14 +343,17 @@ tests/run.js            the test suite: node tests/run.js
 node tests/run.js
 ```
 
-Sixty-nine tests. Text editing is checked on documents made every way they are made in real
+Seventy-six tests. Text editing is checked on documents made every way they are made in real
 life: by pdf-lib, by Chrome's own "Save as PDF" inside the test, and by Microsoft Word, with
 kerning, letter spacing, tabs, bullets, justified lines, form objects, turned pages, and
 Polish, Greek, Russian, Hebrew and Arabic text. Each edit is checked three ways: not one pixel
 may change outside the edited lines, the screen must match the saved file, and a second PDF
 engine (PDFium, the one in Chrome and Edge) must read the new words and none of the old.
 
-The rest cover page operations, annotation fidelity, form fields, selection, find, spell
+Your own marks are tested with the real mouse and keyboard, so focus moves the way it does
+for a person: that is how a text box closing when you clicked its Size field was caught.
+
+The rest cover opening PDFs from Windows, page operations, annotation fidelity, form fields, selection, find, spell
 checking, redaction, OCR, layers, the working copy, undo, memory, password-protected PDFs,
 links and bookmarks, phones and tablets, the scanner, the movable panels, the icon set, the
 welcome screen, the menus, the command search and the update check. Needs Node 18+ and

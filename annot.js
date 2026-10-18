@@ -268,9 +268,22 @@ function setTool(t) {
 }
 $$('#tools button[data-tool]').forEach(b => b.onclick = () => setTool(b.dataset.tool));
 
+// What the property row says when there is nothing in it to set. The row keeps its place either
+// way: it used to fold away, and every click on a mark then moved the whole page by a row's
+// height, so the second click of a double-click landed somewhere else.
+const propsHints = {
+  select: 'Click something you added to change its colour, size or font.',
+  whiteout: 'Whiteout covers what is under it. To take something out of the file, use Redact.',
+  redact: 'Redact takes what is underneath out of the file when you save.',
+};
 function updateProps() {
   const a = state.selected;
   let vis;
+  // every field starts from the defaults, then shows the selected mark's own values, so a field
+  // that is hidden for this kind of mark never carries a stale value into the defaults
+  $('#pColor').value = state.tool === 'highlight' ? defaults.fill : defaults.color;
+  $('#pFillOn').checked = defaults.fillOn; $('#pFill').value = defaults.fill; $('#pWidth').value = defaults.width;
+  $('#pSize').value = defaults.size; $('#pFont').value = defaults.font; $('#pBold').checked = defaults.bold;
   if (a) {
     vis = propVis[a.pts ? (a.type === 'pen' ? 'pen' : 'line') : a.redact ? 'redact' : a.type === 'rect' && a.blend ? 'highlight' : a.type === 'rect' && !a.stroke && a.fill === '#ffffff' ? 'whiteout' : a.type] || [];
     if (a.type === 'text') { $('#pColor').value = a.color; $('#pSize').value = a.size; $('#pFont').value = a.font; $('#pBold').checked = !!a.bold; }
@@ -280,15 +293,20 @@ function updateProps() {
       else { $('#pColor').value = a.stroke || defaults.color; $('#pFillOn').checked = !!a.fill; $('#pFill').value = a.fill || defaults.fill; $('#pWidth').value = a.width; }
     }
     $('#pOpacity').value = a.opacity == null ? 1 : a.opacity;
+  } else if (editing) {                                 // a text box being typed
+    vis = propVis.text; const t = editing;
+    $('#pColor').value = t.color; $('#pSize').value = t.size; $('#pFont').value = t.font; $('#pBold').checked = !!t.bold;
+    $('#pOpacity').value = t.opacity == null ? 1 : t.opacity;
   } else {
     vis = propVis[state.tool] || [];
-    $('#pColor').value = state.tool === 'highlight' ? defaults.fill : defaults.color;
-    $('#pFillOn').checked = defaults.fillOn; $('#pFill').value = defaults.fill; $('#pWidth').value = defaults.width;
-    $('#pSize').value = defaults.size; $('#pFont').value = defaults.font; $('#pBold').checked = defaults.bold;
     $('#pOpacity').value = state.tool === 'highlight' ? 0.45 : defaults.opacity;
   }
   $$('#props label').forEach(l => l.classList.toggle('on', vis.includes(l.dataset.p)));
   $('#btnDelAnnot').style.display = a ? '' : 'none';
+  const ph = $('#propsHint'), empty = !vis.length && !a;
+  ph.textContent = !empty ? '' : typeof KamEdit !== 'undefined' && KamEdit.active()
+    ? 'Editing the PDF’s own text, in its own font and size.' : (propsHints[state.tool] || '');
+  ph.classList.toggle('on', empty);
   $('#hint').textContent = a ? '' : (hints[state.tool] || '');
   touchGrab();
 }
@@ -309,13 +327,22 @@ function onPropChange() {
       if (a.blend) a.fill = color; else { a.stroke = color; a.fill = fillOn ? fill : null; a.width = width; }
     }
     drawOverlay(); refreshThumb(state.cur);
-  } else {
+  }
+  // With a drawing tool in hand (the mark just drawn is selected), or nothing selected at all,
+  // the change is also how the next mark will look. Choosing a mark with Select changes only it.
+  if (!a || state.tool !== 'select') {
     if (state.tool === 'highlight') { defaults.fill = color; } else { defaults.color = color; defaults.fill = fill; }
     defaults.fillOn = fillOn; defaults.width = width; defaults.size = size; defaults.font = font; defaults.bold = bold; defaults.opacity = opacity;
-    if (editing) { editing.color = color; editing.size = size; editing.font = font; editing.bold = bold; editing.opacity = opacity; positionTextEditor(); }
+  }
+  if (editing) {
+    editing.color = color; editing.size = size; editing.font = font; editing.bold = bold; editing.opacity = opacity;
+    positionTextEditor(); drawOverlay();
   }
 }
 ['#pColor', '#pFillOn', '#pFill', '#pWidth', '#pSize', '#pFont', '#pBold', '#pOpacity'].forEach(s => $(s).addEventListener('input', onPropChange));
+// Once a colour, size or font has been chosen for the text box being typed, go back to the
+// text, with the caret where it was. (A number being typed is left alone until Enter.)
+$('#props').addEventListener('change', () => { if (editing) refocusTextEditor(); });
 $('#btnDelAnnot').onclick = deleteSelected;
 function deleteSelected() {
   const a = state.selected; if (!a) return;
@@ -381,6 +408,9 @@ pagesEl.addEventListener('pointerdown', e => {
     if (hit && hit.type === 'text') { startTextEdit(hit); return; }
     drag = { mode: 'textbox', start: [x, y], cur: [x, y] }; return;
   }
+  // the shape just drawn can still be resized by its handles; anywhere else starts the next one
+  if (state.selected && hitHandle(state.selected, x, y)) { pushAnnotUndo(curPageId()); drag = { mode: 'resize', a: state.selected, orig: { ...state.selected } }; return; }
+  if (state.selected) { state.selected = null; updateProps(); }
   pushAnnotUndo(curPageId());
   if (t === 'pen' || t === 'line' || t === 'arrow') {
     const a = { id: uid(), type: t, pts: [[x, y]], color: defaults.color, width: defaults.width, opacity: defaults.opacity };
@@ -463,6 +493,10 @@ function endDrag(e) {
   const a = drag.a, list = curAnnots();
   if ((drag.mode === 'shape' && (a.w < 2 || a.h < 2)) || (drag.mode === 'line' && Math.hypot(a.pts[1][0] - a.pts[0][0], a.pts[1][1] - a.pts[0][1]) < 2)) {
     list.splice(list.indexOf(a), 1); dropLastUndo();
+  } else if (drag.mode === 'shape' || drag.mode === 'line') {
+    // the shape just drawn stays selected, so its colour and width can be changed straight away
+    // (a pen stroke does not: handles round every stroke would get in the way of writing)
+    state.selected = a; updateProps();
   }
   drag = null; drawOverlay(); refreshThumb(state.cur);
 }
@@ -511,16 +545,38 @@ function positionTextEditor() {
   ed.style.width = (a.boxW ? a.boxW * z + 3 : a.w * z + 12) + 'px'; ed.style.height = (a.h * z + 3) + 'px';
 }
 ed.addEventListener('input', () => { if (!editing) return; editing.text = ed.value; positionTextEditor(); });
-ed.addEventListener('keydown', e => { if (e.key === 'Escape') { e.preventDefault(); commitTextEdit(); } e.stopPropagation(); });
-ed.addEventListener('blur', () => commitTextEdit());
-function commitTextEdit() {
+ed.addEventListener('keydown', e => {
+  // Esc finishes and leaves the box selected, so its colour, size and font can still be changed
+  if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); commitTextEdit(true); return; }
+  // save, print, open, find and the command search work from inside a text box too
+  if ((e.ctrlKey || e.metaKey) && ['s', 'p', 'o', 'f', 'k'].includes(e.key.toLowerCase())) { commitTextEdit(true); return; }
+  e.stopPropagation();
+});
+// Clicking the colour, size or font controls keeps the box open, so the change applies to it;
+// so does switching to another window and back. Anywhere else on the page finishes it.
+const keepTyping = () => {
+  const f = document.activeElement;
+  return !document.hasFocus() || f === ed || !!(f && f.closest && f.closest('#props'));
+};
+ed.addEventListener('blur', () => {
+  if (editing) editing._caret = [ed.selectionStart, ed.selectionEnd];
+  setTimeout(() => { if (editing && !keepTyping()) commitTextEdit(); }, 0);
+});
+$('#props').addEventListener('focusout', () => setTimeout(() => { if (editing && !keepTyping()) commitTextEdit(); }, 0));
+function refocusTextEditor() {
+  if (!editing) return;
+  const c = editing._caret || [ed.value.length, ed.value.length];
+  ed.focus({ preventScroll: true }); ed.setSelectionRange(c[0], c[1]);
+}
+function commitTextEdit(select) {
   if (typeof KamEdit !== 'undefined') KamEdit.commit();       // a line of the PDF's own text
   if (!editing) return;
-  const a = editing; editing = null; delete a._editing;
+  const a = editing; editing = null; delete a._editing; delete a._caret;
   a.text = ed.value; ed.style.display = 'none';
+  if (document.activeElement === ed) ed.blur();
   const list = curAnnots();
   if (!a.text.trim()) { const i = list.indexOf(a); if (i >= 0) list.splice(i, 1); }
-  else { measureText(a); warnUnsaveable(a); }
+  else { measureText(a); warnUnsaveable(a); if (select === true && list.includes(a)) state.selected = a; }
   drawOverlay(); refreshThumb(state.cur); updateProps();
 }
 // Say straight away if some of what was typed cannot be saved in this font, not only when the

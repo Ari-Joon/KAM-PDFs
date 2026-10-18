@@ -124,11 +124,16 @@
   }
 
   window.refreshLayers = force => render(force);
-  $('#btnLayersClear').onclick = () => {
+  $('#btnLayersClear').onclick = async () => {
     const list = state.pageIds.length ? (state.annots[state.pageIds[state.cur]] || []) : [];
     if (!list.length) return;
-    const edits = list.filter(a => a.type === 'textedit').length;
-    if (!confirm(`Remove all ${list.length} of your changes to this page?` + (edits ? ` Text you edited goes back to how it was.` : ' The page itself is untouched.'))) return;
+    const edits = list.filter(a => a.type === 'textedit').length, n = list.length;
+    const c = await choose({
+      title: n === 1 ? 'Remove your change to this page?' : `Remove all ${n} of your changes to this page?`,
+      message: (edits ? 'Text you edited goes back to how it was.' : 'The page itself is untouched.') + ' Ctrl+Z brings it all back.',
+      buttons: [{ key: 'clear', label: 'Remove', primary: true }, { key: 'cancel', label: 'Cancel' }],
+    });
+    if (c !== 'clear' || list !== (state.annots[state.pageIds[state.cur]] || [])) return;
     commitTextEdit();
     pushAnnotUndo(state.pageIds[state.cur]);
     list.length = 0; state.selected = null;

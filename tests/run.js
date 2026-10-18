@@ -81,9 +81,19 @@ async function browser() {
     if (m.method === 'Runtime.exceptionThrown') errors.push((m.params.exceptionDetails.exception?.description || m.params.exceptionDetails.text || '').split('\n')[0]);
   };
   const send = (method, params = {}) => new Promise(r => { const i = ++id; pend[i] = r; ws.send(JSON.stringify({ id: i, method, params })); });
+  // "Leave site? Changes you made may not be saved": after real mouse and keyboard input, a page
+  // with unsaved work asks this when the next test reloads it. Leave, as a test means to.
+  const onMessage = ws.onmessage;
+  ws.onmessage = e => { onMessage(e); const m = JSON.parse(e.data); if (m.method === 'Page.javascriptDialogOpening') send('Page.handleJavaScriptDialog', { accept: true }); };
   await send('Runtime.enable');
+  await send('Page.enable');
+  // a headless window is never 'focused', so focus and blur would not behave as they do on a
+  // desktop: pretend it is the window in front
+  await send('Emulation.setFocusEmulationEnabled', { enabled: true });
   const evaluate = async expr => {
-    const r = await send('Runtime.evaluate', { expression: expr, awaitPromise: true, returnByValue: true });
+    let timer;
+    const late = new Promise((_, rej) => { timer = setTimeout(() => rej(new Failed('the page did not answer within 90 seconds: ' + expr.slice(0, 120))), 90000); });
+    const r = await Promise.race([send('Runtime.evaluate', { expression: expr, awaitPromise: true, returnByValue: true }), late]).finally(() => clearTimeout(timer));
     if (r.result.exceptionDetails) {
       const d = r.result.exceptionDetails;
       throw new Error('page error: ' + (d.exception?.description || d.text || '').split('\n')[0]);
@@ -111,6 +121,40 @@ async function browser() {
     },
     // Real touches, as a finger makes them: type is touchStart, touchMove or touchEnd.
     touch: (type, points) => send('Input.dispatchTouchEvent', { type, touchPoints: points.map(([x, y], id) => ({ x, y, id })) }),
+    // Real mouse and keyboard input, in window pixels, so focus moves and blur happens the way
+    // it does for a person. Events made inside the page skip both, and that is where the text
+    // box bugs hid: clicking the Size field took the focus out of the box and closed it.
+    click: async (x, y, count = 1) => {
+      for (let k = 1; k <= count; k++) {
+        await send('Input.dispatchMouseEvent', { type: 'mousePressed', x, y, button: 'left', buttons: 1, clickCount: k });
+        await send('Input.dispatchMouseEvent', { type: 'mouseReleased', x, y, button: 'left', buttons: 0, clickCount: k });
+      }
+      await sleep(60);
+    },
+    drag: async (x0, y0, x1, y1, steps = 8) => {
+      await send('Input.dispatchMouseEvent', { type: 'mousePressed', x: x0, y: y0, button: 'left', buttons: 1, clickCount: 1 });
+      for (let k = 1; k <= steps; k++) await send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: x0 + (x1 - x0) * k / steps, y: y0 + (y1 - y0) * k / steps, button: 'left', buttons: 1 });
+      await send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: x1, y: y1, button: 'left', buttons: 0, clickCount: 1 });
+      await sleep(60);
+    },
+    typeText: async text => { await send('Input.insertText', { text }); await sleep(30); },
+    // key: a single character or Enter, Escape, Tab, Delete...; modifiers: 2 Ctrl, 8 Shift
+    key: async (key, modifiers = 0) => {
+      const named = { Enter: 13, Escape: 27, Tab: 9, Backspace: 8, Delete: 46 }, code = named[key] || key.toUpperCase().charCodeAt(0);
+      const base = { key, code: named[key] ? key : 'Key' + key.toUpperCase(), windowsVirtualKeyCode: code, nativeVirtualKeyCode: code, modifiers };
+      await send('Input.dispatchKeyEvent', { type: 'keyDown', ...base, text: key.length === 1 && !(modifiers & 2) ? key : key === 'Enter' ? '\r' : undefined });
+      await send('Input.dispatchKeyEvent', { type: 'keyUp', ...base });
+      await sleep(40);
+    },
+    // Open the app some other way than the test server: a copy run from a folder (file://)
+    openUrl: async url => {
+      errors.length = 0;
+      await send('Page.navigate', { url });
+      await waitFor(`typeof state !== 'undefined' && typeof KamLaunch !== 'undefined' && typeof KamView !== 'undefined'`);
+    },
+    // where something is on screen: the centre of an element, or a point on the page in use
+    at: sel => evaluate(`(() => { const r = document.querySelector(${JSON.stringify(sel)}).getBoundingClientRect(); return [r.left + r.width / 2, r.top + r.height / 2]; })()`),
+    onPage: (x, y) => evaluate(`(() => { const r = document.getElementById('overlay').getBoundingClientRect(); return [r.left + ${x} * state.zoom, r.top + ${y} * state.zoom]; })()`),
     // Print an HTML page to PDF with Chrome itself, the way "Save as PDF" makes documents:
     // real fonts, embedded as subsets, every letter placed on its own. Returns base64.
     printHtml: async html => {
@@ -1601,6 +1645,105 @@ test('on a tablet the document panel waits in a drawer, and the pages list stays
   } finally { await b.emulate(null); }
 });
 
+/* ---------- marks you add, set with the real mouse and keyboard ---------- */
+
+// Choose a value the way the page sees it after a real click on the control: the control takes
+// the focus (from wherever it was), then its value changes. (A real click on a dropdown or a
+// colour well would open the browser's own popup, which then swallows every later click.)
+const choose = (b, sel, value) => b.evaluate(`(() => { const s = document.querySelector(${JSON.stringify(sel)}); s.focus(); s.value = ${JSON.stringify(value)};
+  s.dispatchEvent(new Event('input', { bubbles: true })); s.dispatchEvent(new Event('change', { bubbles: true })); return 1; })()`);
+const textBoxes = `curAnnots().filter(a => a.type === 'text').map(a => ({ text: a.text, size: a.size, font: a.font, bold: !!a.bold, editing: !!a._editing, selected: state.selected === a }))`;
+
+test('a text box takes the size, font and bold you choose, while you type it and after', async b => {
+  await b.reload();
+  await b.evaluate(makeDoc(`doc.addPage([595, 842]);`));
+  await b.waitFor(settled);
+  await b.evaluate(`setZoom(1); 1`); await b.waitFor(settled);
+  await b.evaluate(`setTool('text'); 1`);
+  await b.click(...await b.onPage(100, 300));
+  await b.typeText('Hello');
+  // the controls take the focus out of the box: it must stay open, and take every change
+  const size = await b.at('#pSize');
+  await b.click(...size, 3); await b.typeText('32'); await b.key('Enter');
+  await choose(b, '#pFont', 'TimesRoman');
+  await b.click(...await b.at('#pBold'));
+  await b.typeText(' world');
+  let t = await b.evaluate(textBoxes);
+  eq(t, [{ text: 'Hello world', size: 32, font: 'TimesRoman', bold: true, editing: true, selected: false }], 'the box took every change, and the typing carried on in it');
+  // Esc finishes it and leaves it selected, so it can still be changed
+  await b.key('Escape');
+  t = await b.evaluate(textBoxes);
+  eq([t[0].editing, t[0].selected], [false, true], 'after Esc the box is selected');
+  await b.click(...size, 3); await b.typeText('20'); await b.key('Enter');
+  await choose(b, '#pFont', 'Courier');
+  t = await b.evaluate(textBoxes);
+  eq([t[0].size, t[0].font], [20, 'Courier'], 'the selected box changes size and font');
+  // a double-click on it edits it, rather than starting a new box on top of it
+  await b.evaluate(`setTool('select'); 1`);
+  await b.click(...await b.onPage(110, 296), 2);
+  await sleep(150);
+  t = await b.evaluate(textBoxes);
+  eq(t.length, 1, 'no second box was made');
+  ok(t[0].editing, 'double-clicking the box edits it');
+  await b.key('Escape');
+  // and the saved file has it in that size and font
+  const saved = await b.evaluate(exportBase64);
+  ok((await b.evaluate(textOf(saved)))[0].includes('Hello world'), 'the text is in the saved file');
+  ok((await b.evaluate(fontsOfSaved(saved))).includes('Courier-Bold'), 'in the font chosen for it');
+});
+
+test('choosing a tool or selecting a mark never moves the page', async b => {
+  await b.reload();
+  await b.evaluate(makeDoc(`doc.addPage([595, 842]).drawText('Some text on the page', { x: 60, y: 760, size: 14, font: f });`));
+  await b.waitFor(settled);
+  await b.evaluate(`setZoom(1); 1`); await b.waitFor(settled);
+  const top = `Math.round(document.getElementById('overlay').getBoundingClientRect().top)`;
+  const t0 = await b.evaluate(top);
+  for (const t of ['text', 'pen', 'rect', 'whiteout', 'redact', 'select']) {
+    await b.evaluate(`setTool('${t}'); 1`);
+    eq(await b.evaluate(top), t0, `the page stayed put with the ${t} tool`);
+  }
+  await b.evaluate(`(() => { pushAnnotUndo(curPageId()); curAnnots().push({ id: uid(), type: 'rect', x: 100, y: 300, w: 120, h: 60, rot: 0, stroke: '#e11d48', fill: '#ffeeee', width: 2, opacity: 1 }); drawOverlay(); return 1; })()`);
+  await b.click(...await b.onPage(160, 330));
+  ok(await b.evaluate(`!!state.selected`), 'the rectangle is selected');
+  eq(await b.evaluate(top), t0, 'selecting it did not move the page');
+  await b.click(...await b.onPage(400, 500));
+  ok(await b.evaluate(`!state.selected`), 'clicking empty paper clears the selection');
+  eq(await b.evaluate(top), t0, 'nor did clearing it');
+  const said = await b.evaluate(`document.getElementById('propsHint').textContent`);
+  ok(/colour, size or font/.test(said), 'with nothing selected, the row says what it is for: ' + JSON.stringify(said));
+});
+
+test('a shape just drawn can be restyled straight away, and the next one follows', async b => {
+  await b.reload();
+  await b.evaluate(makeDoc(`doc.addPage([595, 842]);`));
+  await b.waitFor(settled);
+  await b.evaluate(`setZoom(1); setTool('rect'); 1`); await b.waitFor(settled);
+  await b.drag(...await b.onPage(80, 400), ...await b.onPage(220, 480));
+  ok(await b.evaluate(`!!state.selected && state.selected.type === 'rect'`), 'the rectangle just drawn is selected');
+  await choose(b, '#pColor', '#2563eb');
+  await b.click(...await b.at('#pWidth'), 3); await b.typeText('6'); await b.key('Enter');
+  const rects = `curAnnots().filter(a => a.type === 'rect').map(a => [a.stroke, a.width])`;
+  eq(await b.evaluate(rects), [['#2563eb', 6]], 'the colour and width went to the rectangle just drawn');
+  await b.drag(...await b.onPage(300, 400), ...await b.onPage(420, 480));
+  eq(await b.evaluate(rects), [['#2563eb', 6], ['#2563eb', 6]], 'and the next rectangle is drawn the same way');
+  ok(await b.evaluate(`state.selected === curAnnots()[1]`), 'only the newest one is selected');
+});
+
+test('Ctrl+S from inside a text box saves what was typed', async b => {
+  await b.reload();
+  await b.evaluate(stubSaving);
+  await b.evaluate(makeDoc(`doc.addPage([595, 842]);`));
+  await b.waitFor(settled);
+  await b.evaluate(`setZoom(1); setTool('text'); 1`); await b.waitFor(settled);
+  await b.click(...await b.onPage(100, 300));
+  await b.typeText('Typed right before saving');
+  await b.key('s', 2);
+  await b.waitFor(`window.__downloads.length === 1`, 10000);
+  eq(await b.evaluate(textBoxes), [{ text: 'Typed right before saving', size: 16, font: 'Helvetica', bold: false, editing: false, selected: true }], 'the box was finished first');
+  eq(await b.evaluate(`state.dirty`), false, 'and the document counts as saved');
+});
+
 test('shift constrains shapes and lines', async b => {
   await b.reload();
   await b.evaluate(makeDoc(`doc.addPage([420, 300]);`));
@@ -2470,6 +2613,117 @@ test('paste uses whatever was copied last, here or anywhere else', async b => {
   const withText = await b.evaluate(paste(`dt.setData('text/plain', 'Text from an email');`));
   eq(withText, ['rect', 'image', 'rect', 'text'], 'plain text from elsewhere arrives as a text box');
   eq(await b.evaluate(`curAnnots().at(-1).text`), 'Text from an email', 'with the text in it');
+});
+
+/* ---------- opening a PDF straight from Windows ---------- */
+
+// A one-page PDF with a line of text, as base64.
+const smallPdf = text => `(async () => {
+  const { PDFDocument, StandardFonts } = PDFLib;
+  const d = await PDFDocument.create(); const f = await d.embedFont(StandardFonts.Helvetica);
+  d.addPage([420, 300]).drawText(${JSON.stringify(text)}, { x: 40, y: 250, size: 18, font: f });
+  const u = await d.save(); let s = ''; for (let i = 0; i < u.length; i += 0x8000) s += String.fromCharCode.apply(null, u.subarray(i, i + 0x8000));
+  return btoa(s);
+})()`;
+const textOfHandle = `(async () => { const f = await window.__handle.getFile();
+  const pdf = await pdfjsLib.getDocument({ data: new Uint8Array(await f.arrayBuffer()) }).promise;
+  return (await (await pdf.getPage(1)).getTextContent()).items.map(i => i.str).join(' | '); })()`;
+
+test('a PDF opened from Windows opens straight away, and Save writes back into that file', async b => {
+  await b.reload();
+  await b.evaluate(`KamDraft.clear().then(() => 1)`);
+  // The browser hands the installed app the file itself. Here that is a real file handle, in the
+  // page's own private storage, so Save really writes to a file.
+  const b64 = await b.evaluate(smallPdf('Opened from Windows'));
+  const r = await b.evaluate(`(async () => {
+    const s = atob(${JSON.stringify(b64)}), bytes = Uint8Array.from(s, c => c.charCodeAt(0));
+    const dir = await navigator.storage.getDirectory();
+    const h = await dir.getFileHandle('report.pdf', { create: true });
+    const w = await h.createWritable(); await w.write(bytes); await w.close();
+    window.__handle = h;
+    await KamLaunch.openAll([{ file: await h.getFile(), handle: h }]);
+    return { name: state.fileName, pages: state.pageIds.length, dirty: state.dirty };
+  })()`);
+  eq(r, { name: 'report.pdf', pages: 1, dirty: false }, 'the file opened straight away');
+  await b.evaluate(makeDirty);
+  await b.evaluate(`(() => { window.__picked = false; window.showSaveFilePicker = async () => { window.__picked = true; throw new DOMException('no', 'AbortError'); }; return 1; })()`);
+  await b.evaluate(`savePdf(false)`);
+  const text = await b.evaluate(textOfHandle);
+  ok(/Opened from Windows/.test(text) && /AN HOUR OF WORK/.test(text), 'the opened file itself now has the change: ' + text);
+  eq(await b.evaluate(`window.__picked`), false, 'without asking where to save it');
+  eq(await b.evaluate(`state.dirty`), false, 'and the document counts as saved');
+  // Save As still makes a copy somewhere else
+  await b.evaluate(`savePdf(true)`);
+  eq(await b.evaluate(`window.__picked`), true, 'Save As asks where to put the copy');
+});
+
+test('opening a PDF from Windows asks before it could replace unsaved work kept from last time', async b => {
+  await b.reload();
+  await b.evaluate(makeDoc(`doc.addPage([420, 300]);`));
+  await b.waitFor(settled);
+  await b.evaluate(makeDirty);
+  ok(await b.evaluate(`saveDraftNow()`), 'a working copy with unsaved changes was kept');
+  await b.reload();                                  // the window was closed without saving
+  const b64 = await b.evaluate(smallPdf('A different file'));
+  await b.evaluate(`(() => { const s = atob(${JSON.stringify(b64)}), bytes = Uint8Array.from(s, c => c.charCodeAt(0));
+    window.__opening = KamLaunch.open(new File([bytes], 'other.pdf', { type: 'application/pdf' })); return 1; })()`);
+  await b.waitFor(`document.getElementById('modal').classList.contains('show')`, 10000);
+  ok(/Restore your last session/.test(await b.evaluate(`document.getElementById('modalBox').textContent`)), 'it asks about the kept work');
+  await b.evaluate(`[...document.querySelectorAll('#modalBox button')].find(x => /Restore/.test(x.textContent)).click(); 1`);
+  await b.waitFor(`state.fileName === 'test.pdf' && curAnnots().some(a => a.text === 'AN HOUR OF WORK')`, 15000);
+  ok(true, 'and Restore brings that work back');
+
+  // once that work has been saved, there is nothing to ask about
+  await b.evaluate(stubSaving);
+  await b.evaluate(`savePdf(false)`);
+  await b.waitFor(`!state.dirty`, 10000);
+  await b.evaluate(`saveDraftNow()`);
+  await b.reload();
+  await b.evaluate(`(() => { const s = atob(${JSON.stringify(b64)}), bytes = Uint8Array.from(s, c => c.charCodeAt(0));
+    window.__opening = KamLaunch.open(new File([bytes], 'other.pdf', { type: 'application/pdf' })); return 1; })()`);
+  await b.waitFor(`state.fileName === 'other.pdf'`, 15000);
+  eq(await b.evaluate(`document.getElementById('modal').classList.contains('show')`), false, 'a saved session is not asked about');
+});
+
+test('a copy run from a folder opens the PDF its Windows launcher hands over, and nothing else', async b => {
+  if (process.platform !== 'win32') { console.log('      (skipped: the launcher is for Windows)'); return; }
+  const b64 = await (async () => { await b.reload(); return b.evaluate(smallPdf('Handed over by the launcher')); })();
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'kam-launch-'));
+  const pdfPath = path.join(tmp, 'Résumé – final.pdf');
+  fs.writeFileSync(pdfPath, Buffer.from(b64, 'base64'));
+  // a stand-in for the browser, which writes down what it was asked to open
+  const argsFile = path.join(tmp, 'args.txt'), fake = path.join(tmp, 'browser.cmd');
+  fs.writeFileSync(fake, `@echo off\r\necho %*> "${argsFile}"\r\n`);
+  const ps = spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', path.join(ROOT, 'setup', 'open-pdf.ps1'),
+    '-Browser', fake, '-File', pdfPath, '-KeepSeconds', '30'], { stdio: 'ignore' });
+  try {
+    for (let i = 0; i < 100 && !fs.existsSync(argsFile); i++) await sleep(150);
+    ok(fs.existsSync(argsFile), 'the launcher started the browser');
+    const arg = fs.readFileSync(argsFile, 'utf8').trim();
+    const m = arg.match(/--app="([^"]+)"/);
+    ok(m, 'as an app window: ' + arg);
+    const url = new URL(m[1]);
+    eq(url.protocol, 'file:', 'on the folder copy');
+    ok(url.pathname.endsWith('/index.html'), 'at its main page');
+    const handed = url.searchParams.get('open');
+    ok(/\/KAM%20PDFs\/open\/[0-9a-f]{32}\.js$/.test(handed), 'with the file handed over in local app data: ' + handed);
+    const js = fs.readFileSync(decodeURIComponent(new URL(handed).pathname.slice(1)), 'utf8');
+    const kept = JSON.parse(js.match(/data: ("[^"]+")/)[1]);
+    eq(Buffer.from(kept, 'base64').equals(Buffer.from(b64, 'base64')), true, 'byte for byte');
+    // and the folder copy, opened at that address, opens it under its own name
+    await b.openUrl(m[1]);
+    await b.waitFor(`state.fileName === 'Résumé – final.pdf' && state.pageIds.length === 1 && !!state.pdfjs && !state.renderTask`, 15000);
+    eq(await b.evaluate(`location.search`), '', 'the address forgets it, so a reload does not open it again');
+    const text = await b.evaluate(`KamPdfText.index(0).then(() => KamPdfText.cached(0).runs.map(r => r.text).join(' '))`);
+    ok(/Handed over by the launcher/.test(text), 'the PDF is the one handed over: ' + text);
+    // an address pointing anywhere else is ignored: a link cannot make the app run a script
+    await b.openUrl(m[1].split('?')[0] + '?open=' + encodeURIComponent('file:///C:/Windows/evil.js'));
+    await sleep(500);
+    eq(await b.evaluate(`[state.pageIds.length, [...document.scripts].some(s => /evil/.test(s.src))]`), [0, false], 'nothing outside the launcher folder is loaded');
+  } finally {
+    try { ps.kill(); } catch (e) { }
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
 });
 
 test('the released version number is stated in one place only', async () => {

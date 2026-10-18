@@ -1,6 +1,9 @@
-# KAM PDFs - creates (or removes) Desktop and Start Menu shortcuts.
+# KAM PDFs - creates (or removes) Desktop and Start Menu shortcuts, and puts KAM PDFs in the
+# "Open with" list for PDF files.
 # Run via "Install KAM PDFs.bat" in the folder above, or:
 #   powershell -ExecutionPolicy Bypass -File setup\install.ps1 [-Remove]
+# Everything it writes is for your Windows account only (no administrator rights), and -Remove
+# takes all of it away again.
 param([switch]$Remove)
 
 $root  = Split-Path -Parent $PSScriptRoot
@@ -11,8 +14,46 @@ $desktop   = [Environment]::GetFolderPath('Desktop')
 $startMenu = Join-Path ([Environment]::GetFolderPath('StartMenu')) 'Programs'
 $links = @((Join-Path $desktop $name), (Join-Path $startMenu $name))
 
+# "Open with > KAM PDFs" for a copy that runs from this folder. (KAM PDFs installed from the
+# website does not need this: the browser lists it there by itself.)
+$progId = 'KAMPDFs.Document'
+$hkcu = [Microsoft.Win32.Registry]::CurrentUser
+function Register-OpenWith([string]$browser) {
+  $launcher = Join-Path $PSScriptRoot 'open-pdf.ps1'
+  $conhost = Join-Path $env:SystemRoot 'System32\conhost.exe'
+  $ps = Join-Path $PSHOME 'powershell.exe'
+  $run = "-NoProfile -NonInteractive -ExecutionPolicy Bypass -File `"$launcher`" -Browser `"$browser`" -File `"%1`""
+  # conhost --headless runs the launcher without a console window flashing up (Windows 10 1809+)
+  $cmd = if ([Environment]::OSVersion.Version.Build -ge 17763 -and (Test-Path $conhost)) { "`"$conhost`" --headless `"$ps`" $run" } else { "`"$ps`" -WindowStyle Hidden $run" }
+  $k = $hkcu.CreateSubKey("Software\Classes\$progId")
+  $k.SetValue('', 'PDF document'); $k.SetValue('FriendlyTypeName', 'PDF document')
+  $k.CreateSubKey('DefaultIcon').SetValue('', "`"$icon`",0")
+  $a = $k.CreateSubKey('Application')
+  $a.SetValue('ApplicationName', 'KAM PDFs'); $a.SetValue('ApplicationIcon', "`"$icon`",0")
+  $a.SetValue('ApplicationCompany', 'KAM'); $a.SetValue('ApplicationDescription', 'Free offline PDF editor and scanner')
+  $k.CreateSubKey('shell\open').SetValue('FriendlyAppName', 'KAM PDFs')
+  $k.CreateSubKey('shell\open\command').SetValue('', $cmd)
+  $hkcu.CreateSubKey('Software\Classes\.pdf\OpenWithProgids').SetValue($progId, [byte[]]@(), [Microsoft.Win32.RegistryValueKind]::None)
+  # and in Settings > Apps > Default apps, where it can be made the app for PDFs
+  $c = $hkcu.CreateSubKey('Software\KAM PDFs\Capabilities')
+  $c.SetValue('ApplicationName', 'KAM PDFs'); $c.SetValue('ApplicationDescription', 'Free offline PDF editor and scanner'); $c.SetValue('ApplicationIcon', "`"$icon`",0")
+  $c.CreateSubKey('FileAssociations').SetValue('.pdf', $progId)
+  $hkcu.CreateSubKey('Software\RegisteredApplications').SetValue('KAM PDFs', 'Software\KAM PDFs\Capabilities')
+}
+function Unregister-OpenWith {
+  $had = $false
+  if ($hkcu.OpenSubKey("Software\Classes\$progId")) { $hkcu.DeleteSubKeyTree("Software\Classes\$progId", $false); $had = $true }
+  $ow = $hkcu.OpenSubKey('Software\Classes\.pdf\OpenWithProgids', $true)
+  if ($ow -and ($ow.GetValueNames() -contains $progId)) { $ow.DeleteValue($progId, $false) }
+  if ($hkcu.OpenSubKey('Software\KAM PDFs')) { $hkcu.DeleteSubKeyTree('Software\KAM PDFs', $false) }
+  $ra = $hkcu.OpenSubKey('Software\RegisteredApplications', $true)
+  if ($ra -and ($ra.GetValueNames() -contains 'KAM PDFs')) { $ra.DeleteValue('KAM PDFs', $false) }
+  return $had
+}
+
 if ($Remove) {
   foreach ($l in $links) { if (Test-Path $l) { Remove-Item $l -Force; Write-Host "Removed $l" } }
+  if (Unregister-OpenWith) { Write-Host 'Removed KAM PDFs from "Open with" for PDF files' }
   Write-Host 'Done. The KAM PDFs folder itself was not touched.'
   exit 0
 }
@@ -98,6 +139,15 @@ if ($app) {
   }
 }
 
+# Opening PDFs from Windows. The app installed from the website registers itself for that,
+# so a folder registration from an earlier install would only be a second, confusing entry.
+if ($app) {
+  if (Unregister-OpenWith) { Write-Host 'Removed the folder copy from "Open with": the installed app is listed there itself.' }
+} elseif ($browser) {
+  Register-OpenWith $browser
+  Write-Host 'Added KAM PDFs to "Open with" for PDF files.'
+}
+
 Write-Host ''
 if ($app) {
   Write-Host 'KAM PDFs is installed as an app, so the shortcut launches that (sharp taskbar icon).'
@@ -112,3 +162,5 @@ if ($app) {
 }
 Write-Host ''
 Write-Host 'All set. Look for the KAM PDFs icon on your Desktop and in the Start Menu.'
+Write-Host 'To open a PDF with it, right-click the file and choose Open with > KAM PDFs. To make it'
+Write-Host 'your PDF app, choose Open with > Choose another app, pick KAM PDFs and tick "Always".'

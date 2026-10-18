@@ -39,10 +39,13 @@
   }
 
   $('#btnOcrPage').onclick = () => { if (!state.doc) return toast('Open a PDF first'); ocrPages([state.cur]); };
-  $('#btnOcrAll').onclick = () => {
+  $('#btnOcrAll').onclick = async () => {
     if (!state.doc) return toast('Open a PDF first');
     const n = state.pageIds.length;
-    if (n > 5 && !confirm(`Read all ${n} pages? This can take a while.`)) return;
+    if (n > 5 && await choose({
+      title: `Read all ${n} pages?`, message: 'Reading the words off every page can take a while. You can keep working while it does.',
+      buttons: [{ key: 'go', label: 'Read them all', primary: true }, { key: 'cancel', label: 'Cancel' }],
+    }) !== 'go') return;
     ocrPages([...Array(n).keys()]);
   };
 
