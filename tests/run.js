@@ -754,13 +754,15 @@ const openBase64 = (b64, name) => `(async () => {
 const editPhrase = (starts, text, page = 0) => `(async () => {
   await KamContent.analyse(${page});
   const it = KamContent.current(${page}).find(c => c.text.startsWith(${JSON.stringify(starts)}));
-  if (!it) throw new Error('no phrase starts with ' + ${JSON.stringify(starts)});
+  if (!it) throw new Error('no phrase starts with ' + ${JSON.stringify(starts)} + ' among ' + JSON.stringify(KamContent.current(${page}).map(c => c.text)));
   if (state.cur !== ${page}) KamView.setActive(${page});
   const b = it.box, t = b.rot * Math.PI / 180, lx = Math.min(b.w / 2, 4), ly = b.h / 2;
   const x = b.x + lx * Math.cos(t) - ly * Math.sin(t), y = b.y + lx * Math.sin(t) + ly * Math.cos(t);
   if (!(await pdfTextEditAt(x, y))) throw new Error('could not start editing ' + ${JSON.stringify(starts)});
   const ta = document.getElementById('phraseInput');
-  ta.value = ${JSON.stringify(text)}; ta.dispatchEvent(new Event('input'));
+  // a line of a paragraph is edited as part of the paragraph's text
+  ta.value = KamEdit.isPara() ? ta.value.replace(it.text, () => ${JSON.stringify(text)}) : ${JSON.stringify(text)};
+  ta.dispatchEvent(new Event('input'));
   ta.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
   await KamView.whenIdle();
   return (state.annots[state.pageIds[${page}]] || []).filter(a => a.type === 'textedit').length;
@@ -996,6 +998,11 @@ test('an edit keeps a line lined up the way it was: justified, right-aligned or 
     'each line knows how it is lined up');
 
   await b.evaluate(editPhrase('The tenant', 'The tenant agrees to keep the property very clean'));
+  // the line no longer fits, so the words flow on: "clean" starts the next line, and that
+  // line's last word moves down in turn
+  const flowed = await b.evaluate(`KamContent.current(0).map(c => c.text)`);
+  ok(flowed.includes('The tenant agrees to keep the property very') && flowed.some(t => t.startsWith('clean and in good repair')) && flowed.some(t => t.startsWith('term of this agreement')),
+    'the words flowed from line to line: ' + JSON.stringify(flowed.slice(0, 3)));
   await b.evaluate(editPhrase('£45.00', '£1,045.00'));
   await b.evaluate(editPhrase('Annual', 'Annual Statement 2024'));
   await b.waitFor(settled);
@@ -1004,11 +1011,160 @@ test('an edit keeps a line lined up the way it was: justified, right-aligned or 
   const span = async (b64, y0, y1) => b.evaluate(inkSpan(b64, y0, y1));
   const [j0, j1, a0, a1, t0, t1] = [await span(orig, 58, 74), await span(saved, 58, 74), await span(orig, 168, 184), await span(saved, 168, 184), await span(orig, 262, 284), await span(saved, 262, 284)];
   near(j1[0], j0[0], 0.3, 'the justified line still starts at the margin');
-  near(j1[1], j0[1], 0.3, 'the justified line still reaches the right margin');
+  // the margin is where the last letter's box ends; a different last letter ("very", now that
+  // "clean" has moved down) puts its ink a fraction of a point differently
+  near(j1[1], j0[1], 0.9, 'the justified line still reaches the right margin');
   near(a1[1], a0[1], 0.3, 'the amount still ends on the right edge of its column');
   near((t1[0] + t1[1]) / 2, 250, 0.9, 'the title is still centred');
   const text = (await b.evaluate(textOf(saved)))[0].replace(/\s+/g, ' ');
   ok(text.includes('keep the property very clean') && text.includes('£1,045.00') && text.includes('Annual Statement 2024'), `the edits read wrong: ${text}`);
+});
+
+/* ---------- paragraphs that flow ---------- */
+
+const FLOW_HTML = (gap = 16) => `<!doctype html><html><head><meta charset="utf-8"><style>
+  @page { size: A4; margin: 20mm; } body { font: 11pt Arial, 'Liberation Sans', sans-serif; color: #111; }
+  p { width: 400pt; margin: 0 0 ${gap}pt; line-height: 1.3; } .j { text-align: justify; }
+</style></head><body>
+<p>The tenancy begins on the first day of the month and runs for <b>twelve months</b>. The tenant pays the rent in advance on the first working day of each month by bank transfer, and keeps the property clean and in good repair throughout the whole of the term.</p>
+<p class="j">Either party may end this agreement by giving two months notice in writing. The deposit is held in a government approved scheme and is returned within ten days of the end of the tenancy, less any deductions agreed in writing for damage beyond fair wear and tear.</p>
+<p>Signed for and on behalf of the landlord.</p>
+</body></html>`;
+// The fonts a saved PDF draws some words in (their BaseFont names, as pdf.js reads them).
+const fontsOfWords = (b64, words) => `(async () => {
+  const s = atob(${JSON.stringify(b64)}), u = Uint8Array.from(s, c => c.charCodeAt(0));
+  const page = await (await pdfjsLib.getDocument({ data: u }).promise).getPage(1);
+  await page.getOperatorList();
+  const tc = await page.getTextContent();
+  return ${JSON.stringify(words)}.map(w => { const it = tc.items.find(i => i.str.includes(w)); if (!it) return 'missing'; try { return page.commonObjs.get(it.fontName).name; } catch (e) { return 'unknown'; } });
+})()`;
+const lineTexts = `KamContent.analyse(0).then(() => KamContent.current(0).map(c => c.text))`;
+// The band a paragraph's lines take up, in display points, with room for one more line below.
+const paraBand = starts => `(async () => {
+  const an = await KamContent.analyse(0), P = an.paraOf.get(an.phrases.find(p => p.text.startsWith(${JSON.stringify(starts)})).key);
+  const ls = P.lines, top = Math.min(...ls.map(l => l.box.y)), bot = Math.max(...ls.map(l => l.box.y + l.box.h));
+  return { x0: P.Lmin - 2, x1: P.R + 2, y0: top - 2, y1: bot + P.step + 2, R: P.R, step: P.step, ys: ls.map(l => [l.box.y, l.box.y + l.box.h]) };
+})()`;
+
+test('an edited paragraph flows: words move on to the next lines, keep their own font, and move back', async b => {
+  const pdf64 = await b.printHtml(FLOW_HTML());
+  await b.reload();
+  await b.evaluate(openBase64(pdf64, 'flow.pdf'));
+  await b.waitFor(settled);
+  const paras = await b.evaluate(`KamContent.analyse(0).then(an => an.paras.map(P => [P.lines[0].text.slice(0, 11), P.lines.length, P.align]))`);
+  eq(paras, [['The tenancy', 4, 'left'], ['Either part', 4, 'justify']], 'the two paragraphs are found, one ragged and one justified');
+  const band = await b.evaluate(paraBand('The tenancy'));
+  const before = await b.evaluate(lineTexts);
+
+  // a longer first line: the words flow on down the paragraph
+  const line1 = before.find(t => t.startsWith('The tenancy'));
+  await b.evaluate(editPhrase('The tenancy', line1.replace('begins on', 'begins at noon on')));
+  await b.waitFor(settled);
+  const now = await b.evaluate(lineTexts);
+  ok(now[0].startsWith('The tenancy begins at noon on') && now[0].endsWith('twelve') && now[1].startsWith('months.'), 'words moved on to the next line: ' + JSON.stringify(now.slice(0, 4)));
+  eq(now.slice(4), before.slice(4), 'the next paragraph and the signature line are untouched');
+  const saved = await b.evaluate(exportBase64);
+  const text = (await b.evaluate(textOf(saved)))[0].replace(/\s+/g, ' ');
+  const para1 = 'The tenancy begins at noon on the first day of the month and runs for twelve months. The tenant pays the rent in advance on the first working day of each month by bank transfer, and keeps the property clean and in good repair throughout the whole of the term.';
+  // (a reader puts a space between words in two fonts: "months" bold, then "." not)
+  const loose = t => t.replace(/\s+([.,;:])/g, '$1');
+  ok(loose(text).includes(para1), 'the saved paragraph reads in order: ' + text);
+  // every line still inside the margin
+  for (const [y0, y1] of band.ys) { const ink = await b.evaluate(inkSpan(saved, y0 + 1, y1 - 1)); ok(ink[1] <= band.R + 1, `a line runs past the margin: ends at ${ink[1]}, margin ${band.R}`); }
+  // the bold words kept their bold font, though "months" moved to another line
+  const f = await b.evaluate(fontsOfWords(saved, ['twelve', 'months', 'tenancy']));
+  ok(/Bold/i.test(f[0]) && /Bold/i.test(f[1]) && !/Bold/i.test(f[2]), 'the bold words are still bold, the rest is not: ' + JSON.stringify(f));
+  // nothing outside the paragraph moved, and the screen is the file
+  eq(await b.evaluate(changedOutside(saved, [[band.x0, band.y0, band.x1, band.y1]])), 0, 'pixels changed outside the edited paragraph');
+  const scr = await b.evaluate(screenVsSaved(saved));
+  ok(scr.differing / scr.total < 0.0003, `the screen and the saved file differ: ${scr.differing} pixels`);
+  const fium = pdfiumText(Buffer.from(saved, 'base64'));
+  if (fium !== null) ok(loose(fium.replace(/\s+/g, ' ')).includes(para1), 'PDFium reads the paragraph in order: ' + fium);
+
+  // a shorter line: words come back up from the line below
+  const line2 = now[1];
+  await b.evaluate(editPhrase(line2.slice(0, 12), line2.replace('the rent in advance on', 'the rent on')));
+  await b.waitFor(settled);
+  const back = await b.evaluate(lineTexts);
+  ok(back[1].length > line2.length - 'in advance '.length + 3, 'the shortened line took words from the next one: ' + JSON.stringify(back.slice(0, 4)));
+  const saved2 = await b.evaluate(exportBase64);
+  const text2 = loose((await b.evaluate(textOf(saved2)))[0].replace(/\s+/g, ' '));
+  ok(text2.includes(para1.replace('the rent in advance on', 'the rent on')), 'and the paragraph still reads in order: ' + text2);
+  // putting the words back puts the paragraph back exactly as it was
+  const l1 = back[0];
+  await b.evaluate(editPhrase(l1.slice(0, 12), l1.replace('at noon ', '')));
+  const l2 = (await b.evaluate(lineTexts)).find(t => t.includes('the rent on'));
+  await b.evaluate(editPhrase(l2.slice(0, 12), l2.replace('the rent on', 'the rent in advance on')));
+  await b.waitFor(settled);
+  eq(await b.evaluate(lineTexts), before, 'the paragraph is back to its old lines');
+  eq(await b.evaluate(`curAnnots().filter(a => a.type === 'textedit').length`), 0, 'and no edit is left over');
+});
+
+test('a paragraph that needs another line gets one below it where there is room, and says so where there is not', async b => {
+  for (const gap of [16, 0]) {
+    const pdf64 = await b.printHtml(FLOW_HTML(gap));
+    await b.reload();
+    await b.evaluate(openBase64(pdf64, 'flow.pdf'));
+    await b.waitFor(settled);
+    const before = await b.evaluate(lineTexts);
+    const last = before.find(t => t.includes('of the term.'));
+    await b.evaluate(`(() => { window.__toasts = []; const t = document.getElementById('toast'); new MutationObserver(() => window.__toasts.push(t.textContent)).observe(t, { childList: true, characterData: true, subtree: true }); return 1; })()`);
+    await b.evaluate(editPhrase(last.slice(0, 10), last.replace('of the term.', 'of the term, and for as long afterwards as the tenant stays in the property, on the same terms as this agreement sets out.')));
+    await b.waitFor(settled);
+    const now = await b.evaluate(lineTexts);
+    const tail = 'the term, and for as long afterwards as the tenant stays in the property, on the same terms as this agreement sets out.';
+    ok((await b.evaluate(`curAnnots().find(a => a.type === 'textedit').text`)).includes(tail), `gap ${gap}: nothing typed is lost`);
+    if (gap) {
+      const saved = await b.evaluate(exportBase64);
+      const text = (await b.evaluate(textOf(saved)))[0].replace(/\s+/g, ' ');
+      ok(text.includes(tail), 'the saved file reads the whole paragraph: ' + text);
+      eq(now.length, before.length + 1, 'with room below, the paragraph gained a line');
+      ok(now[4].endsWith('agreement sets out.'), 'the new line holds the end of the paragraph: ' + JSON.stringify(now.slice(2, 6)));
+      eq(now.slice(5), before.slice(4), 'the paragraphs below did not move');
+    } else {
+      eq(now.length, before.length, 'with no room below, no line is added over the next paragraph');
+      ok(now.some(t => t.endsWith('agreement sets out.')), 'the end runs on along the last line');
+      ok((await b.evaluate(`window.__toasts.join(' ')`)).includes('no room'), 'and it says so');
+    }
+  }
+});
+
+test('lists, columns of amounts and an address are not taken for paragraphs', async b => {
+  const pdf64 = await b.printHtml(`<!doctype html><html><head><meta charset="utf-8"><style>@page { size: A4; margin: 20mm; } body { font: 11pt Arial, sans-serif; } p { margin: 0; line-height: 1.3; }</style></head><body>
+    <p>Southwind Lettings Ltd</p><p>14 Harbour Street</p><p>Bristol BS1 4QA</p><br>
+    <p>£45.00</p><p>£1,303.20</p><p>£96.00</p><br>
+    <p>Alice Smith</p><p>Bob Jones</p><p>Charlie Brown</p>
+  </body></html>`);
+  await b.reload();
+  await b.evaluate(openBase64(pdf64, 'lists.pdf'));
+  await b.waitFor(settled);
+  eq(await b.evaluate(`KamContent.analyse(0).then(an => an.paras.length)`), 0, 'no paragraphs');
+  // and an edit there stays on its line, as before
+  await b.evaluate(editPhrase('Bob Jones', 'Bob Jones and family'));
+  ok((await b.evaluate(lineTexts)).includes('Bob Jones and family'), 'the edited name stays on its own line');
+});
+
+test('a line of an edited paragraph can be deleted, and Ctrl+Z puts the paragraph back', async b => {
+  const pdf64 = await b.printHtml(FLOW_HTML());
+  await b.reload();
+  await b.evaluate(openBase64(pdf64, 'flow.pdf'));
+  await b.waitFor(settled);
+  const before = await b.evaluate(lineTexts);
+  await b.evaluate(editPhrase('The tenancy', before[0].replace('begins on', 'begins at noon on')));
+  await b.waitFor(settled);
+  const edited = await b.evaluate(lineTexts);
+  // pick the second line and press Delete: its words go, the rest of the paragraph closes up
+  const box = await b.evaluate(`(() => { const it = KamContent.current(0).find(c => c.text === ${JSON.stringify(edited[1])}); return [it.box.x + 20, it.box.y + it.box.h / 2]; })()`);
+  await b.evaluate(`pdfTextSelect(${box[0]}, ${box[1]}); 1`);
+  await sleep(200);
+  ok(await b.evaluate(`pdfTextDeleteSelected()`), 'the line was picked and deleted');
+  await b.waitFor(settled);
+  const after = await b.evaluate(lineTexts);
+  ok(!after.join(' ').includes(edited[1]) && after[1].startsWith(edited[2].split(' ')[0]), 'the next line moved up into its place: ' + JSON.stringify(after.slice(0, 4)));
+  await b.evaluate(`undo()`); await b.waitFor(settled);
+  eq(await b.evaluate(lineTexts), edited, 'Ctrl+Z brings the line back');
+  await b.evaluate(`undo()`); await b.waitFor(settled);
+  eq(await b.evaluate(lineTexts), before, 'and again, the paragraph as it was');
 });
 
 test('a Word document is edited in its own fonts, with its tabs, bullets and justified lines kept', async b => {

@@ -604,6 +604,7 @@ const KamContent = (() => {
     alignments(an, out);
     an.phrases = out;
     an.byKey = new Map(out.map(p => [p.key, p]));
+    paragraphs(an, out);
   }
   /* How each line is aligned, judged from the lines around it: a word processor would keep a
      right-aligned amount lined up on the right, a centred title centred, and a justified line
@@ -672,7 +673,7 @@ const KamContent = (() => {
         const vp = page.getViewport({ scale: 1 });
         const fontOf = fontGetter(page);
         an = readPage(state.doc.context, state.doc.getPage(i).node, pdfjsShows(ol), fontOf, vp.transform);
-        an.fontOf = fontOf; an.page = i; an.pageId = id;
+        an.fontOf = fontOf; an.page = i; an.pageId = id; an.pageW = vp.width; an.pageH = vp.height;
         if (an.ok) { place(an, fontOf); buildPhrases(an); } else an.phrases = [];
       } catch (e) {
         console.warn('text engine: could not read page ' + (i + 1), e);
@@ -713,7 +714,7 @@ const KamContent = (() => {
   /* The heart of it: what the page looks like with a phrase's wording changed to `text`.
      Synchronous, using the fonts that are loaded; anything still missing is listed in `needs`
      so the caller can load it and ask again. */
-  function layout(an, ph, text) {
+  function layout(an, ph, text, opt) {
     const glyphs = an.glyphs, old = ph.text;
     const res = { ok: true, removed: new Set(), shift: new Map(), ins: [], draws: [], chars: [], needs: [], missing: [], du: 0 };
     const need = k => { if (!res.needs.includes(k)) res.needs.push(k); };
@@ -864,7 +865,7 @@ const KamContent = (() => {
     // half of each; a justified line's word gaps, all of them, take up the difference so that it
     // still reaches both margins (within reason: gaps are not squeezed shut or pulled wide open).
     const grow0 = x0 + toDisp(x) - oldEnd;
-    const align = Math.abs(grow0) > 1e-3 ? ph.align || 'left' : 'left';
+    const align = Math.abs(grow0) > 1e-3 ? (opt && opt.align) || ph.align || 'left' : 'left';
     let per = 0;                                                 // taken off each word gap, justified lines
     if (align === 'justify' && G > 0) { per = Math.max(-2 * spaceWant, Math.min(0.6 * spaceWant, grow0 / G)); cut = per; if (per) layMid(); }
     const dn = text.length - old.length;                         // old index + dn = new index, after the change
@@ -963,15 +964,664 @@ const KamContent = (() => {
   }
   const boxFields = b => ({ x: b.x, y: b.y, w: b.w, h: b.h, rot: b.rot });
 
+  /* ---------- paragraphs: lines that belong together, so an edit flows from one into the next ----------
+     A paragraph is a run of lines in one column with the same text frame (font size, scale and
+     slant, in the same content stream), a steady line spacing, and a common left edge (the first
+     line may be indented), right edge or centre. Lines that end early are where paragraphs end:
+     if the next line's first word would have fitted on a line, it was broken on purpose. And a
+     column of short lines (amounts, names, an address) is not a paragraph: every line but the
+     last holds at least four words, and the column is at least fifteen letters wide. */
+  const SPC = /\s/;
+  const hiS = c => c >= 0xD800 && c <= 0xDBFF, loS = c => c >= 0xDC00 && c <= 0xDFFF;
+  const wordCount = t => (t.trim().match(/\S+/g) || []).length;
+  function inkStart(ph) { for (let i = 0; i < ph.text.length; i++) if (!SPC.test(ph.text[i])) return i; return -1; }
+  // Text inserted at any point of a line can be placed from any of its glyphs only if they
+  // share one frame: the same stream, transformation, text scale and size.
+  function frameOf(an, ph) {
+    const r = v => Math.round(v * 1000) / 1000;
+    let key = null;
+    for (const id of ph.glyphs) {
+      const g = an.glyphs[id], op = an.ops[g.op];
+      const k = [op.c, op.ctm.map(r).join(' '), g.Tm.slice(0, 4).map(r).join(' '), r(Math.abs(op.size)), r(op.Th)].join('|');
+      if (key === null) key = k; else if (k !== key) return null;
+    }
+    return key;
+  }
+  // The width of a space in the paragraph's most used style, without word spacing (which is
+  // how justified lines are stretched).
+  function naturalSpace(an, lines) {
+    const n = new Map();
+    for (const ph of lines) for (const id of ph.glyphs) { const o = an.glyphs[id].op; n.set(o, (n.get(o) || 0) + 1); }
+    let best = -1, c = 0; for (const [o, k] of n) if (k > c) { best = o; c = k; }
+    if (best >= 0) {
+      const op = an.ops[best], e = encodeOrig(an.fontOf(op.font), 32), g = an.glyphs[op.glyphs[0]];
+      if (e && g) return Math.max(0.05 * lines[0].size, (e.w0 * Math.abs(op.size) + op.Tc) * op.Th * g.kx);
+    }
+    const sp = lines.map(p => p.spaceAdv).filter(v => v > 0).sort((a, b) => a - b);
+    return sp.length ? sp[0] : 0.28 * lines[0].size;
+  }
+  // characters a paragraph already draws in a font, by code: new letters reuse them exactly
+  function seenOf(an, lines) {
+    const memo = new Map();
+    return fontId => {
+      let m = memo.get(fontId); if (m) return m;
+      m = new Map();
+      for (const ph of lines) for (const id of ph.glyphs) { const g = an.glyphs[id]; if (an.ops[g.op].font === fontId) { const t = uniText(g.uni); if (t.length === 1 && !m.has(t)) m.set(t, g.code); } }
+      memo.set(fontId, m);
+      return m;
+    };
+  }
+  function finishPara(an, P) {
+    const ls = P.lines, n = ls.length;
+    P.size = ls[0].size; P.dir = ls[0].dir; P.perp = ls[0].perp; P.angle = ls[0].angle;
+    P.spaceW = naturalSpace(an, ls);
+    P.seen = seenOf(an, ls);
+    P.origText = ls.map(l => l.text).join(' ');
+    if (!(P.step > 0)) P.step = n > 1 ? (ls[0].v - ls[n - 1].v) / (n - 1) : 1.2 * P.size;
+    if (P.Lc === undefined) P.Lc = n > 1 ? ls[1].left : ls[0].left;
+    if (P.Lmin === undefined) P.Lmin = Math.min(...ls.map(l => l.left));
+    if (P.axis === undefined) P.axis = ls.reduce((a, l) => a + (l.s + l.e) / 2, 0) / n;
+    if (!P.kind) P.kind = P.align === 'right' ? 'right' : P.align === 'center' ? 'center' : 'left';
+    return P;
+  }
+  function paragraphs(an, list) {
+    an.paras = []; an.paraOf = new Map();
+    const lines = [], isLine = new Set();
+    for (const p of list) {
+      const f = inkStart(p); if (f < 0) continue;
+      p.left = p.chars[f].u0;
+      if (!p.editable) continue;
+      p.frame = frameOf(an, p); if (!p.frame) continue;
+      let e = f; while (e < p.text.length && !SPC.test(p.text[e])) e++;
+      p.firstW = p.chars[e - 1].u1 - p.chars[f].u0;
+      p.nWords = wordCount(p.text);
+      lines.push(p); isLine.add(p);
+    }
+    // the next line down in the same column, whatever it is
+    const below = new Map();
+    for (const p of lines) {
+      let best = null;
+      for (const q of list) {
+        if (q === p || Math.abs(q.angle - p.angle) > 0.5 || q.v > p.v - 0.5 * p.size || q.e <= p.s || q.s >= p.e) continue;
+        if (!best || q.v > best.v) best = q;
+      }
+      if (best) below.set(p, best);
+    }
+    const used = new Set();
+    for (const p of lines.slice().sort((a, b) => b.v - a.v || a.left - b.left)) {
+      if (used.has(p)) continue;
+      used.add(p);
+      const chain = [p], size = p.size, tol = 0.6 + 0.04 * size;
+      let kind = null, step = 0, Lc = 0;
+      for (let cur = p; ;) {
+        const q = below.get(cur);
+        if (!q || used.has(q) || !isLine.has(q) || q.frame !== p.frame) break;
+        const st = cur.v - q.v;
+        if (st < 0.95 * size || st > 1.9 * size || (chain.length > 1 && Math.abs(st - step) > 0.12 * size)) break;
+        const dl = q.left - cur.left, de = q.e - cur.e, dc = (q.s + q.e) / 2 - (cur.s + cur.e) / 2;
+        if (chain.length === 1) {
+          if (Math.abs(dl) <= tol) kind = 'left';
+          else if (Math.abs(de) <= tol) kind = 'right';
+          else if (Math.abs(dc) <= tol) kind = 'center';
+          else if (Math.abs(dl) <= 8 * size) kind = 'left';        // the first line indented, or hanging
+          else break;
+          step = st; Lc = q.left;
+        } else {
+          if (kind === 'left' && Math.abs(q.left - Lc) > tol) break;
+          if (kind === 'right' && Math.abs(de) > tol) break;
+          if (kind === 'center' && Math.abs(dc) > tol) break;
+          step = (step * (chain.length - 1) + st) / chain.length;
+        }
+        chain.push(q); used.add(q); cur = q;
+      }
+      if (chain.length < 2) continue;
+      // the column's right edge: as far as any line of it reaches, nearby
+      let R = Math.max(...chain.map(l => l.e));
+      if (kind === 'left') {
+        const top = chain[0].v + 30 * size, bot = chain[chain.length - 1].v - 30 * size;
+        for (const q of lines) if (q.frame === p.frame && q.left >= Lc - tol && q.left <= Lc + 8 * size && q.v <= top && q.v >= bot) R = Math.max(R, q.e);
+      }
+      const sp = naturalSpace(an, chain), slack = Math.max(1, 0.25 * size), widest = Math.max(...chain.map(l => l.e - l.left));
+      const endedEarly = i => {
+        const l = chain[i], nx = chain[i + 1];
+        return kind === 'left' ? l.e + sp + nx.firstW <= R - slack : (l.e - l.left) + sp + nx.firstW <= widest - slack;
+      };
+      let a = 0;
+      const emit = b => {
+        const ls = chain.slice(a, b); a = b;
+        if (ls.length < 2 || ls.slice(0, -1).some(l => l.nWords < 4)) return;
+        const width = kind === 'left' ? R - Math.min(...ls.map(l => l.left)) : Math.max(...ls.map(l => l.e - l.left));
+        if (width < 15 * size) return;
+        // Justified: every full line ends at the same place, and their word gaps are stretched
+        // to get there. (Two lines of ragged text can end together by chance.) Its full lines
+        // then mark the margin exactly.
+        const full = ls.slice(0, -1), ends = full.map(l => l.e);
+        const justified = kind === 'left' && Math.max(...ends) - Math.min(...ends) <= tol && full.some(l => l.spaceAdv > 1.12 * sp);
+        const P = finishPara(an, {
+          lines: ls, kind, step, R: justified ? Math.max(...ends) : kind === 'left' ? R : Math.max(...ls.map(l => l.e)),
+          align: justified ? 'justify' : kind,
+        });
+        an.paras.push(P);
+        for (const l of ls) an.paraOf.set(l.key, P);
+      };
+      for (let i = 0; i + 1 < chain.length; i++) if (endedEarly(i)) emit(i + 1);
+      emit(chain.length);
+    }
+  }
+  // Is there room for a line of the paragraph at baseline v: no letter of anything else there,
+  // and inside the page?
+  function roomFor(an, P, v) {
+    const asc = Math.max(...P.lines.map(l => l.top - l.v)), desc = Math.max(...P.lines.map(l => l.v - l.bot));
+    const lo = v - desc, hi = v + asc, u0 = P.Lmin, u1 = P.R, d = P.dir, pp = P.perp;
+    const mine = new Set(P.lines.flatMap(l => l.all));
+    for (const g of an.glyphs) {
+      if (!g.visible || mine.has(g.id)) continue;
+      let gu0 = g.u0, gu1 = g.u1, gb = g.bot, gt = g.top;
+      if (Math.abs(g.angle - P.angle) > 1) {                  // turned another way: its middle, in this frame
+        const gp = [g.dir[1], -g.dir[0]], cu = (g.u0 + g.u1) / 2, cv = (g.top + g.bot) / 2;
+        const X = g.dir[0] * cu + gp[0] * cv, Y = g.dir[1] * cu + gp[1] * cv;
+        gu0 = gu1 = X * d[0] + Y * d[1]; gb = gt = X * pp[0] + Y * pp[1];
+      }
+      if (gt <= lo || gb >= hi || gu1 <= u0 || gu0 >= u1) continue;
+      return false;
+    }
+    const m = 0.5 * P.size;
+    for (const u of [u0, u1]) for (const w of [lo, hi]) {
+      const x = d[0] * u + pp[0] * w, y = d[1] * u + pp[1] * w;
+      if (x < m || y < m || x > an.pageW - m || y > an.pageH - m) return false;
+    }
+    return true;
+  }
+  // The width of a new letter in the style it takes, in the PDF's font or the bundled one.
+  function freshAdvance(an, P, it, cp, need) {
+    const sg = an.glyphs[it.style], op = an.ops[sg.op], font = an.fontOf(op.font), Tfs = op.size;
+    if (!it.fb) {
+      const e = encodeOrig(font, cp, P.seen(op.font));
+      if (e) return { w: Math.abs((e.w0 * Tfs + op.Tc + (e.space ? op.Tw : 0)) * op.Th) * sg.kx, enc: e };
+    }
+    let key = KamFonts.fallbackKey(font), b = KamFonts.bundledNow(key), gl = b && KamFonts.glyphFor(b.fk, cp);
+    if (b && !gl) { key = KamFonts.lastResortKey(font); b = KamFonts.bundledNow(key); gl = b && KamFonts.glyphFor(b.fk, cp); }
+    if (!b) { need(key); return { w: 0.5 * sg.size, pending: true }; }
+    if (!gl) return { w: 0, missing: true };
+    return { w: Math.abs((gl.advanceWidth / b.fk.unitsPerEm * Tfs + op.Tc) * op.Th) * sg.kx, fb: { key, fk: b.fk, glyph: gl } };
+  }
+
+  /* What a paragraph looks like with its wording changed to `text`: the words are set again
+     from the first line that changed, filling each line to the column's edge and pulling words
+     up from the next line when there is room; once a line ends where it used to, the rest stays
+     as it was. Words that move keep their own glyphs, font, colour and letter spacing. If the
+     paragraph needs another line it goes below, where that space is empty of other text; if it
+     is not, the end runs past the margin and `overflow` says so. */
+  function layoutPara(an, P, text) {
+    const G = an.glyphs, lines = P.lines, n = lines.length;
+    text = String(text).replace(/[\r\n]+/g, ' ');
+    const res = { para: P, text, slots: [], stops: [], needs: [], missing: [], overflow: false, box: null };
+    const need = k => { if (!res.needs.includes(k)) res.needs.push(k); };
+    // 1. the paragraph as it was: each character, with the line and glyph it comes from
+    const O = [], lineAt = [];
+    lines.forEach((ph, li) => {
+      if (li > 0) O.push({ ch: ' ', g: null, line: -1, ci: -1, brk: li });
+      lineAt[li] = O.length;
+      for (let ci = 0; ci < ph.text.length; ci++) O.push({ ch: ph.text[ci], g: ph.chars[ci].g, line: li, ci });
+    });
+    // 2. what changed. Word by word (the longest run of words the two have in common, in
+    // order), then letter by letter inside each stretch that changed: two edits far apart in a
+    // paragraph are two small changes, and every word between them stays exactly as it was,
+    // with its own glyphs, font and place in the file.
+    const otext = O.map(o => o.ch).join('');
+    O.forEach((o, k) => { o.oi = k; });
+    const tokenize = t => { const out = []; const re = /\s+|\S+/g; let m; while ((m = re.exec(t))) out.push({ t: m[0], a: m.index, b: m.index + m[0].length }); return out; };
+    const tO = tokenize(otext), tN = tokenize(text);
+    let h = 0; while (h < tO.length && h < tN.length && tO[h].t === tN[h].t) h++;
+    let e = 0; while (e < tO.length - h && e < tN.length - h && tO[tO.length - 1 - e].t === tN[tN.length - 1 - e].t) e++;
+    const mO = tO.length - h - e, mN = tN.length - h - e;
+    const regions = [];                                       // [O from, O to, text from, text to], in characters
+    const region = (i0, i1, j0, j1) => {
+      const oa = i0 < tO.length ? tO[i0].a : O.length, ob = i1 > i0 ? tO[i1 - 1].b : oa;
+      const na = j0 < tN.length ? tN[j0].a : text.length, nb = j1 > j0 ? tN[j1 - 1].b : na;
+      if (ob > oa || nb > na) regions.push([oa, ob, na, nb]);
+    };
+    if (mO * mN > 2e6) region(h, h + mO, h, h + mN);         // an enormous change: one stretch
+    else {
+      const L = []; for (let i = 0; i <= mO; i++) L.push(new Uint16Array(mN + 1));
+      for (let i = mO - 1; i >= 0; i--) for (let j = mN - 1; j >= 0; j--)
+        L[i][j] = tO[h + i].t === tN[h + j].t ? L[i + 1][j + 1] + 1 : Math.max(L[i + 1][j], L[i][j + 1]);
+      let i = 0, j = 0;
+      while (i < mO || j < mN) {
+        if (i < mO && j < mN && tO[h + i].t === tN[h + j].t && L[i][j] === L[i + 1][j + 1] + 1) { i++; j++; continue; }
+        const i0 = i, j0 = j;
+        while ((i < mO || j < mN) && !(i < mO && j < mN && tO[h + i].t === tN[h + j].t && L[i][j] === L[i + 1][j + 1] + 1)) {
+          if (j < mN && (i >= mO || L[i][j + 1] >= L[i + 1][j])) j++; else i++;
+        }
+        region(h + i0, h + i, h + j0, h + j);
+      }
+    }
+    const tied = (a, b) => !!a && !!b && a.g !== null && a.g === b.g;
+    const C = []; let at = 0, firstO = -1, lastO = -1;
+    for (const [oa0, ob0, na0, nb0] of regions) {
+      let oa = oa0, ob = ob0, na = na0, nb = nb0;
+      // the common beginning and end of the stretch stay, but never half a ligature or of a
+      // pair of surrogates
+      let p = 0; while (oa + p < ob && na + p < nb && O[oa + p].ch === text[na + p]) p++;
+      let q = 0; while (q < ob - oa - p && q < nb - na - p && O[ob - 1 - q].ch === text[nb - 1 - q]) q++;
+      while (p > 0 && oa + p < O.length && tied(O[oa + p - 1], O[oa + p])) p--;
+      while (q > 0 && ob - q - 1 >= 0 && tied(O[ob - q - 1], O[ob - q])) q--;
+      if (p > 0 && hiS(text.charCodeAt(na + p - 1))) p--;
+      if (q > 0 && loS(text.charCodeAt(nb - q))) q--;
+      for (let k = at; k < oa + p; k++) C.push(O[k]);
+      for (let k = na + p; k < nb - q; k++) C.push({ ch: text[k], g: null, line: -1, ci: -1, fresh: true });
+      at = ob - q;
+      if (oa + p < ob - q || na + p < nb - q) { if (firstO < 0) firstO = oa + p; lastO = ob - q; }
+    }
+    for (let k = at; k < O.length; k++) C.push(O[k]);
+    const changed = firstO >= 0;
+    // new letters take the style of the letter before them (or, at the very start, after)
+    for (let k = 0; k < C.length; k++) {
+      const c = C[k]; if (!c.fresh) continue;
+      let st = null, after = true;
+      for (let i = k - 1; i >= 0 && st === null; i--) if (!C[i].fresh && C[i].g !== null && !SPC.test(C[i].ch)) st = C[i].g;
+      if (st === null) { after = false; for (let i = k + 1; i < C.length && st === null; i++) if (!C[i].fresh && C[i].g !== null && !SPC.test(C[i].ch)) st = C[i].g; }
+      c.style = st === null ? lines[0].glyphs[0] : st; c.after = after;
+    }
+    // a word that needs a letter its font does not have is set wholly in the matching bundled
+    // font, its old letters too: patched letter by letter it looked odd
+    for (let i = 0; i < C.length;) {
+      if (SPC.test(C[i].ch)) { i++; continue; }
+      let j = i; while (j < C.length && !SPC.test(C[j].ch)) j++;
+      let lacks = false;
+      for (let k = i; k < j && !lacks; k++) {
+        const c = C[k]; if (!c.fresh || loS(text.charCodeAt(k))) continue;
+        const op = an.ops[G[c.style].op];
+        if (!encodeOrig(an.fontOf(op.font), text.codePointAt(k), P.seen(op.font))) lacks = true;
+      }
+      if (lacks) for (let k = i; k < j; k++) {
+        const c = C[k];
+        C[k] = { ch: c.ch, g: null, line: -1, ci: -1, style: c.fresh ? c.style : c.g, after: c.fresh ? c.after : false, fresh: true, fb: true };
+      }
+      i = j;
+    }
+    // 3. the words, and how wide each is: letters still in a run of their old line keep their
+    // old spacing (kerning included), new letters are measured
+    const toks = [], offs = new Array(C.length);
+    for (let i = 0; i < C.length;) { if (SPC.test(C[i].ch)) { i++; continue; } let j = i; while (j < C.length && !SPC.test(C[j].ch)) j++; toks.push({ a: i, b: j }); i = j; }
+    for (const t of toks) {
+      let x = 0;
+      for (let i = t.a; i < t.b;) {
+        const c = C[i];
+        if (!c.fresh) {
+          const ph = lines[c.line]; let j = i;
+          while (j + 1 < t.b && !C[j + 1].fresh && C[j + 1].line === c.line && C[j + 1].ci === C[j].ci + 1) j++;
+          const base = ph.chars[c.ci].u0;
+          for (let k = i; k <= j; k++) { const q = ph.chars[C[k].ci]; offs[k] = [x + q.u0 - base, x + q.u1 - base]; }
+          x += ph.chars[C[j].ci].u1 - base; i = j + 1;
+        } else {
+          const cp = text.codePointAt(i), two = cp > 0xffff;
+          const m = freshAdvance(an, P, c, cp, need);
+          if (m.missing) res.missing.push(String.fromCodePoint(cp));
+          c.m = m; offs[i] = [x, x + m.w];
+          if (two && i + 1 < t.b) offs[i + 1] = [x + m.w, x + m.w];
+          x += m.w; i += two ? 2 : 1;
+        }
+      }
+      t.w = x;
+      const c0 = C[t.a], c1 = C[t.b - 1];
+      t.line = !c0.fresh && !c1.fresh && c0.line === c1.line && t.b - t.a === c1.ci - c0.ci + 1 ? c0.line : -1;
+    }
+    const gapN = (t, u) => Math.max(1, toks[u].a - toks[t].b);
+    const origCount = lines.map(ph => wordCount(ph.text));
+    // the line's own words, exactly as they were, with nothing new between them?
+    const same = (list, j) => {
+      if (j >= n || list.length !== origCount[j] || !list.length) return false;
+      for (const ti of list) if (toks[ti].line !== j) return false;
+      for (let i = toks[list[0]].a; i < toks[list[list.length - 1]].b; i++) if (C[i].fresh || C[i].line !== j) return false;
+      return true;
+    };
+    // 4. which words go on which line
+    const k0 = !changed ? n : firstO >= O.length ? n - 1 : O[firstO].line >= 0 ? O[firstO].line : O[firstO].brk - 1;
+    const left = j => (j < n ? lines[j].left : P.Lc);
+    const avail = j => (P.kind === 'left' ? P.R - left(j) : P.R - P.Lmin);
+    const assign = gapF => {
+      const slots = []; let t = 0;
+      for (let j = 0; j < Math.min(k0, n); j++) {
+        const list = []; while (t < toks.length && toks[t].line === j && C[toks[t].b - 1].oi < firstO) list.push(t++);
+        slots.push(list);
+      }
+      // the line above the change takes words from below, if the first word of the next line
+      // changed: an unchanged one did not fit there before
+      if (k0 > 0 && k0 < n) {
+        const firstEnd = lineAt[k0] + ((lines[k0].text.match(/^\s*\S+/) || [''])[0]).length;
+        if (firstO <= firstEnd) {
+          const j = k0 - 1, list = slots[j];
+          let end = list.length ? lines[j].e : left(j);
+          while (t < toks.length) {
+            const w = toks[t].w + (list.length ? gapF * P.spaceW * gapN(list[list.length - 1], t) : 0);
+            if (end + w > left(j) + avail(j) + 0.5) break;
+            list.push(t++); end += w;
+          }
+        }
+      }
+      let j = Math.min(k0, n), overflow = false;
+      for (; t < toks.length; j++) {
+        if (j >= n && !roomFor(an, P, lines[n - 1].v - (j - n + 1) * P.step)) { overflow = true; break; }
+        const list = []; let w = 0;
+        while (t < toks.length) {
+          if (j < n && same(list, j)) break;                      // the line as it was: its break stands
+          const tw = toks[t].w + (list.length ? gapF * P.spaceW * gapN(list[list.length - 1], t) : 0);
+          if (list.length && w + tw > avail(j) + 0.5) break;
+          list.push(t++); w += tw;
+        }
+        slots.push(list);
+        // from the start of the next line on, everything is as it was: those lines stay
+        const c0 = t < toks.length ? C[toks[t].a] : null;
+        if (j + 1 < n && c0 && toks[t].line === j + 1 && c0.oi >= lastO && c0.ci === inkStart(lines[j + 1])) {
+          for (let k = j + 1; k < n; k++) { const l = []; for (let c = 0; c < origCount[k]; c++) l.push(t++); slots.push(l); }
+          j = n; break;
+        }
+      }
+      for (; j < n; j++) slots.push([]);                          // lines left with nothing
+      return { slots, t, overflow };
+    };
+    let A = assign(1);
+    if (A.overflow) { const B = assign(0.8); if (!B.overflow) A = B; }
+    if (A.overflow) { res.overflow = true; const last = A.slots[A.slots.length - 1]; while (A.t < toks.length) last.push(A.t++); }
+    // 5. each line laid out: as it was, edited within itself (the one-line layout), or set anew
+    const fromLines = list => { const f = new Set(); for (const ti of list) for (let i = toks[ti].a; i < toks[ti].b; i++) if (!C[i].fresh) f.add(C[i].line); return f; };
+    const home = new Map();
+    A.slots.forEach((list, j) => { for (const l of fromLines(list)) { let h = home.get(l); if (!h) home.set(l, h = new Set()); h.add(j); } });
+    const inLine = (list, j) => { for (const l of fromLines(list)) if (l !== j) return false; const h = home.get(j); return !h || (h.size === 1 && h.has(j)); };
+    const lastFull = A.slots.map(l => l.length > 0).lastIndexOf(true);
+    const lastLine = lines[n - 1];
+    A.slots.forEach((list, j) => {
+      const virtual = j >= n, ph = virtual ? null : lines[j];
+      const v = virtual ? lastLine.v - (j - n + 1) * P.step : ph.v;
+      const sl = {
+        j, ph, virtual, v, top: virtual ? v + (lastLine.top - lastLine.v) : ph.top, bot: virtual ? v + (lastLine.bot - lastLine.v) : ph.bot,
+        align: P.align === 'justify' ? (j === lastFull ? 'left' : 'justify') : P.align, left: left(j), toks: list,
+        changed: false, inline: false, lay: null, text: '', range: [0, 0], box: null,
+      };
+      if (list.length) { sl.range = [toks[list[0]].a, toks[list[list.length - 1]].b]; sl.text = text.slice(sl.range[0], sl.range[1]); }
+      const sameRole = P.align !== 'justify' || (j === lastFull) === (j === n - 1);
+      if (!virtual && (same(list, j) || (!list.length && !ph.text.trim())) && sameRole) sl.lay = layoutOf(an, ph, { text: ph.text });
+      else {
+        // edited within itself: the one-line layout, unless it cannot keep the line inside the
+        // margin (it only squeezes a justified line's gaps so far), then the line is set anew
+        if (!virtual && inLine(list, j) && sameRole) {
+          const lay = layout(an, ph, sl.text, { align: sl.align });
+          if (P.kind !== 'left' || lay.u1 <= P.R + 0.75) { sl.lay = lay; sl.inline = true; }
+        }
+        if (!sl.lay) sl.lay = layoutSlot(an, P, C, offs, toks, sl, text, need);
+        sl.changed = true;
+      }
+      for (const k of sl.lay.needs || []) need(k);
+      for (const m of sl.lay.missing || []) res.missing.push(m);
+      if (list.length || virtual) sl.box = sl.lay.box;
+      if (virtual) sl.vph = { key: lastLine.key + '+' + (j - n + 1), text: sl.text, box: sl.box, editable: true, virtual: true,
+        dir: P.dir, perp: P.perp, top: sl.top, bot: sl.bot, v, size: P.size, align: sl.align, glyphs: [], all: [], chars: [], gkeys: [] };
+      res.slots.push(sl);
+    });
+    // 6. where every character is, for the caret
+    const pos = new Array(text.length);
+    for (const sl of res.slots) {
+      if (!sl.toks.length) continue;
+      const [a, b] = sl.range;
+      if (sl.inline) { for (let k = 0; k < b - a; k++) { const c = sl.lay.chars[k]; if (c) pos[a + k] = { slot: sl.j, u0: c[0], u1: c[1] }; } }
+      else if (!sl.changed) { for (let i = a; i < b; i++) { const c = C[i], q = c.ci >= 0 ? sl.ph.chars[c.ci] : null; if (q) pos[i] = { slot: sl.j, u0: q.u0, u1: q.u1 }; } }
+      else for (let i = a; i < b; i++) { const q = sl.lay.pos.get(i); if (q) pos[i] = { slot: sl.j, u0: q[0], u1: q[1] }; }
+    }
+    const firstSlot = res.slots.find(sl => sl.toks.length) || res.slots[0];
+    for (let i = 0; i < text.length; i++) if (!pos[i]) {
+      const pv = i > 0 ? pos[i - 1] : null;
+      pos[i] = pv ? { slot: pv.slot, u0: pv.u1, u1: pv.u1, brk: true } : { slot: firstSlot.j, u0: firstSlot.left, u1: firstSlot.left, brk: true };
+    }
+    for (let i = 0; i <= text.length; i++) {
+      if (i === 0) { res.stops.push(text.length ? { slot: pos[0].slot, u: pos[0].u0 } : { slot: firstSlot.j, u: firstSlot.left }); continue; }
+      const pv = pos[i - 1];
+      res.stops.push(pv.brk && i < text.length && !pos[i].brk ? { slot: pos[i].slot, u: pos[i].u0 } : { slot: pv.slot, u: pv.u1 });
+    }
+    res.pos = pos;
+    // 7. the box round all of it
+    let u0 = Infinity, u1 = -Infinity, top = -Infinity, bot = Infinity;
+    for (const sl of res.slots) {
+      if (!sl.box) continue;
+      u0 = Math.min(u0, sl.lay.u0); u1 = Math.max(u1, sl.lay.u1); top = Math.max(top, sl.top); bot = Math.min(bot, sl.bot);
+    }
+    if (!isFinite(u0)) { u0 = P.Lmin; u1 = P.Lmin + 1; top = lines[0].top; bot = lines[0].bot; }
+    res.u0 = u0; res.u1 = u1;
+    res.box = boxOf(P.dir, P.perp, u0, Math.max(u1, u0 + 0.5), top, bot);
+    res.lays = res.slots.filter(sl => sl.changed).map(sl => sl.lay);
+    res.ref = lines[0].glyphs[0];
+    return res;
+  }
+
+  /* One line of a paragraph set anew: its own words that stay are kept and moved along, words
+     from other lines are written here in their own style (each in its own text operation, so
+     its font, colour and spacing come with it), and new letters take the style beside them. */
+  function layoutSlot(an, P, C, offs, toks, sl, text, need) {
+    const G = an.glyphs, VT = an.VT, d = P.dir, pp = P.perp, ph = sl.ph;
+    const res = { ok: true, removed: new Set(), shift: new Map(), ins: [], draws: [], pos: new Map(), needs: [], missing: [], chars: [] };
+    const list = sl.toks.map(ti => toks[ti]);
+    // the gaps: a gap the line had between two of its own words keeps its width
+    const gaps = [];
+    for (let k = 0; k + 1 < list.length; k++) {
+      const A = list[k], B = list[k + 1], last = C[A.b - 1], first = C[B.a];
+      let orig = !!ph && !last.fresh && !first.fresh && last.line === sl.j && first.line === sl.j && first.ci === last.ci + (B.a - A.b) + 1;
+      for (let i = A.b; i < B.a && orig; i++) if (C[i].fresh || C[i].line !== sl.j) orig = false;
+      gaps.push({ w: orig ? ph.chars[first.ci].u0 - ph.chars[last.ci].u1 : Math.max(1, B.a - A.b) * P.spaceW, orig });
+    }
+    const wordsW = list.reduce((x, t) => x + t.w, 0);
+    const avail = P.kind === 'left' ? P.R - sl.left : P.R - P.Lmin;
+    let gapW;
+    if (sl.align === 'justify' && gaps.length) {
+      // every gap the same, reaching the margin; a line too loose for that is left ragged
+      const each = (avail - wordsW) / gaps.length;
+      gapW = each > 4 * P.spaceW ? (k => gaps[k].w) : (k => Math.max(each, 0.75 * P.spaceW));
+    } else {
+      const natural = wordsW + gaps.reduce((x, g) => x + g.w, 0);
+      const per = natural > avail && gaps.length ? Math.max((avail - natural) / gaps.length, -0.25 * P.spaceW) : 0;
+      gapW = k => gaps[k].w + per;
+    }
+    let W = wordsW; for (let k = 0; k < gaps.length; k++) W += gapW(k);
+    let x = sl.align === 'right' ? P.R - W : sl.align === 'center' ? P.axis - W / 2 : sl.left;
+    list.forEach((t, k) => {
+      for (let i = t.a; i < t.b; i++) if (offs[i]) res.pos.set(i, [x + offs[i][0], x + offs[i][1]]);
+      x += t.w;
+      if (k + 1 < list.length) {
+        const g = gapW(k), B = list[k + 1], nWs = B.a - t.b;
+        for (let i = t.b; i < B.a; i++) res.pos.set(i, [x + g * (i - t.b) / nWs, x + g * (i - t.b + 1) / nWs]);
+        x += g;
+      }
+    });
+    // the line's own glyphs that stay, moved along; the rest of them go
+    const moveOf = new Map();
+    if (ph) {
+      const keep = new Set();
+      for (let i = sl.range[0]; i < sl.range[1]; i++) {
+        const c = C[i]; if (c.fresh || c.g === null || c.line !== sl.j || keep.has(c.g)) continue;
+        const q = res.pos.get(i); if (!q) continue;
+        const du = q[0] - ph.chars[c.ci].u0;
+        for (const id of [c.g, ...(G[c.g].shadows || [])]) { keep.add(id); if (Math.abs(du) > 1e-3) moveOf.set(id, du); }
+      }
+      for (const id of ph.all) if (!keep.has(id)) res.removed.add(id);
+      for (const [id, du] of moveOf) { const g = G[id]; res.shift.set(id, du / g.kx * (g.dir[0] * d[0] + g.dir[1] * d[1] < 0 ? -1 : 1) * (g.tx < 0 ? -1 : 1)); }
+    }
+    // everything else on the line is written in, one run per text operation
+    const runs = [];
+    list.forEach((t, k) => {
+      let run = null;
+      for (let i = t.a; i < t.b; i++) {
+        const c = C[i];
+        if (ph && !c.fresh && c.g !== null && c.line === sl.j) { run = null; continue; }
+        if (loS(text.charCodeAt(i)) && run) { run.items.push(i); continue; }
+        const opId = G[c.fresh ? c.style : c.g].op;
+        if (!run || run.op !== opId) { run = { op: opId, items: [], lead: i === t.a && k > 0 ? k : 0 }; runs.push(run); }
+        run.items.push(i);
+      }
+    });
+    for (const run of runs) {
+      const op = an.ops[run.op], font = an.fontOf(op.font), Tfs = op.size, Th = op.Th, seen = P.seen(op.font);
+      const moved = run.items.map(i => C[i]).find(c => !c.fresh);
+      const c0 = C[run.items[0]];
+      const anchor = moved ? moved.g : c0.style, before = moved ? true : !c0.after;
+      const a = G[anchor], aop = an.ops[a.op];
+      // a space in front, where the run starts a word after a gap, so the words read apart
+      const spEnc = run.lead ? encodeOrig(font, 32, seen) : null;
+      const startU = spEnc ? res.pos.get(list[run.lead - 1].b)[0] : res.pos.get(run.items[0])[0];
+      const X = d[0] * startU + pp[0] * sl.v, Y = d[1] * startU + pp[1] * sl.v;
+      const q = pt(inv(mul(mul(a.Tm, aop.ctm), VT)), X, Y);
+      const Tm0 = mul(tr(q[0], q[1]), a.Tm);
+      const kx = a.kx, adv = (w0, space) => (w0 * Tfs + op.Tc + (space ? op.Tw : 0)) * Th;
+      const pieces = []; let piece = null, cur = 0;
+      const push = (kind, key, item) => { if (!piece || piece.kind !== kind || piece.key !== key) { piece = { kind, key, items: [] }; pieces.push(piece); } piece.items.push(item); };
+      const place = (kind, key, xt, item, tx) => { if (Math.abs(xt - cur) > 1e-6) push(kind, key, { move: xt - cur }); item.x = xt; item.tx = tx; push(kind, key, item); cur = xt + tx; };
+      if (spEnc) place('orig', '', 0, { bytes: spEnc.bytes, ch: ' ', code: spEnc.code }, adv(spEnc.w0, spEnc.space));
+      let lastG = null;
+      for (const i of run.items) {
+        const c = C[i]; if (loS(text.charCodeAt(i))) continue;
+        const xt = (res.pos.get(i)[0] - startU) / kx;
+        if (!c.fresh) {
+          if (c.g === lastG) continue;                            // the second letter of a ligature
+          lastG = c.g; const g = G[c.g];
+          place('orig', '', xt, { bytes: g.bytes, ch: uniText(g.uni) || ' ', code: g.code, fontChar: g.fontChar }, adv(g.w0, g.space));
+        } else {
+          const m = c.m; if (!m || m.pending || m.missing) continue;
+          const ch = String.fromCodePoint(text.codePointAt(i));
+          if (m.fb) place('fb', m.fb.key, xt, { ch, fk: m.fb.fk, glyph: m.fb.glyph }, (m.fb.glyph.advanceWidth / m.fb.fk.unitsPerEm * Tfs + op.Tc) * Th);
+          else place('orig', '', xt, { bytes: m.enc.bytes, code: m.enc.code, ch }, adv(m.enc.w0, m.enc.space));
+        }
+      }
+      if (!pieces.some(pc => pc.items.some(it => it.bytes || it.ch))) continue;
+      res.ins.push({ op: run.op, at: { g: anchor, before }, Tm: Tm0, pieces, st: { Tc: op.Tc, Tw: op.Tw } });
+      const base = mul(mul(Tm0, op.ctm), VT);
+      for (const pc of pieces) for (const it of pc.items) {
+        if (it.move !== undefined || (it.ch === ' ' && pc.kind === 'orig')) continue;
+        let fk, glyph = null;
+        if (pc.kind === 'fb') { fk = it.fk; glyph = it.glyph; }
+        else {
+          const df = drawFontFor(font); if (df.need) { need(df.need); continue; }
+          fk = df.fk;
+          if (df.own) {
+            if (it.fontChar) glyph = KamFonts.glyphFor(fk, it.fontChar.codePointAt(0));
+            else if (it.code !== undefined && font.toFontChar && font.toFontChar[it.code] !== undefined) glyph = KamFonts.glyphFor(fk, font.toFontChar[it.code]);
+          }
+          if (!glyph && it.ch) glyph = KamFonts.glyphFor(fk, it.ch.codePointAt(0));
+        }
+        if (!glyph) continue;
+        res.draws.push({ fk, glyph, E: mul([Tfs * Th, 0, 0, Tfs, 0, op.Ts], mul(tr(it.x, 0), base)), op });
+      }
+    }
+    // the kept glyphs, on screen
+    if (ph) for (const id of ph.all) {
+      if (res.removed.has(id)) continue;
+      const g = G[id], op = an.ops[g.op], font = an.fontOf(op.font), du = moveOf.get(id) || 0;
+      const df = drawFontFor(font); if (df.need) { need(df.need); continue; }
+      let glyph = null;
+      if (df.own && g.fontChar) glyph = KamFonts.glyphFor(df.fk, g.fontChar.codePointAt(0));
+      if (!glyph) { const t = uniText(g.uni); if (t) glyph = KamFonts.glyphFor(df.fk, t.codePointAt(0)); }
+      if (!glyph) continue;
+      const E = mul(mul(mul([op.size * op.Th, 0, 0, op.size, 0, op.Ts], g.Tm), op.ctm), VT);
+      res.draws.push({ fk: df.fk, glyph, E: du ? mul(E, tr(d[0] * du, d[1] * du)) : E, op });
+    }
+    let u0 = Infinity, u1 = -Infinity;
+    for (const [, q] of res.pos) { u0 = Math.min(u0, q[0]); u1 = Math.max(u1, q[1]); }
+    if (!isFinite(u0)) u0 = u1 = sl.left;
+    res.u0 = u0; res.u1 = u1;
+    res.box = boxOf(d, pp, u0, Math.max(u1, u0 + 0.5), sl.top, sl.bot);
+    res.ref = ph ? ph.glyphs[0] : P.lines[0].glyphs[0];
+    res.text = sl.text;
+    return res;
+  }
+  async function paraLayoutReady(an, P, text) {
+    await KamFonts.ready();
+    for (let tries = 0; tries < 4; tries++) {
+      const r = layoutPara(an, P, text);
+      if (!r.needs.length) return r;
+      await Promise.all(r.needs.map(k => KamFonts.bundled(k).catch(e => console.warn(e))));
+    }
+    return layoutPara(an, P, text);
+  }
+  // The layout of a paragraph edit already made, for drawing and for finding it with the mouse.
+  function paraLayoutOf(an, P, e) {
+    const k = `${an.fp}|P|${P.lines[0].key}|${P.lines.length}|${e.text}`;
+    let r = layoutCache.get(k);
+    if (!r || r.needs.length || r.early) {
+      r = layoutPara(an, P, e.text);
+      if (!KamFonts.isReady()) {
+        r.early = true;
+        if (!fontkitAsked) { fontkitAsked = true; KamFonts.ready().then(() => { layoutCache.clear(); drawOverlay(); }).catch(() => null); }
+      }
+      layoutCache.set(k, r);
+      if (r.needs.length) Promise.all(r.needs.map(key => KamFonts.bundled(key).catch(() => null))).then(() => { layoutCache.delete(k); drawOverlay(); });
+      while (layoutCache.size > 200) layoutCache.delete(layoutCache.keys().next().value);
+    }
+    return r;
+  }
+  // The lines a paragraph edit is about, if they are all still on the page as they were.
+  function paraOfEdit(an, e) {
+    const sp = e && e.src && e.src.para;
+    if (!sp || !an || !an.byKey || e.src.fp !== an.fp) return null;
+    const phs = [];
+    for (const l of sp.lines) {
+      const ph = an.byKey.get(l.key);
+      if (!ph || ph.gkeys.length !== l.glyphs.length) return null;
+      for (let k = 0; k < l.glyphs.length; k++) if (ph.gkeys[k] !== l.glyphs[k]) return null;
+      phs.push(ph);
+    }
+    const P0 = an.paraOf && an.paraOf.get(phs[0].key);
+    if (P0 && P0.lines.length === phs.length && P0.lines.every((l, i) => l === phs[i])) return P0;
+    return finishPara(an, { lines: phs, R: sp.R, step: sp.step, align: sp.align, kind: sp.kind, Lc: sp.Lc, Lmin: sp.Lmin, axis: sp.axis });
+  }
+  function newParaEdit(an, P, text) {
+    const first = P.lines[0];
+    return {
+      id: uid(), type: 'textedit', text,
+      src: { key: first.key, glyphs: first.gkeys.slice(), text: P.origText, fp: an.fp,
+             para: { lines: P.lines.map(l => ({ key: l.key, glyphs: l.gkeys.slice() })), R: P.R, step: P.step, align: P.align, kind: P.kind, Lc: P.Lc, Lmin: P.Lmin, axis: P.axis } },
+      x: 0, y: 0, w: 0, h: 0, rot: 0, opacity: 1,
+    };
+  }
+  // What double-clicking a line edits: the line on its own, or the whole paragraph it is part of.
+  // A paragraph is edited as one piece of text, with what single lines of it were changed to
+  // before (those edits become part of the paragraph's).
+  function unitOf(i, item) {
+    const an = cached(i); if (!an || !an.ok || !item || !item.ph) return null;
+    const e = item.edit;
+    if (e && e.src && e.src.para) { const P = paraOfEdit(an, e); return P ? { kind: 'para', para: P, edit: e, text: e.text, oldEdits: [] } : null; }
+    if (item.ph.virtual) return null;
+    const P = an.paraOf && an.paraOf.get(item.ph.key);
+    if (!P) return { kind: 'line', ph: item.ph, edit: e, text: e ? e.text : item.ph.text };
+    const eds = editsOf(i).filter(x => !x.hidden && !(x.src && x.src.para));
+    if (editsOf(i).some(x => x.src && x.src.para && x.src.para.lines.some(l => P.lines.some(ph => ph.key === l.key)))) return { kind: 'line', ph: item.ph, edit: e, text: e ? e.text : item.ph.text };
+    const parts = [], old = [];
+    for (const ph of P.lines) {
+      const x = eds.find(y => y.src.key === ph.key && phraseOfEdit(an, y) === ph);
+      if (x) old.push(x);
+      parts.push(x ? x.text : ph.text);
+    }
+    return { kind: 'para', para: P, edit: null, text: parts.join(' '), oldEdits: old };
+  }
+
   /* ---------- the phrases as they are now: original, or edited ---------- */
   // What is on the page at the moment, for the mouse: every phrase, with an edited one showing
   // its new wording and box. Deleted phrases are gone.
   function current(i) {
     const an = cached(i); if (!an || !an.ok) return [];
     const eds = editsOf(i).filter(e => !e.hidden);
-    const byKey = new Map(); for (const e of eds) byKey.set(e.src.key, e);
+    const byKey = new Map(), inPara = new Map();
+    for (const e of eds) {
+      if (!(e.src && e.src.para)) { byKey.set(e.src.key, e); continue; }
+      const P = paraOfEdit(an, e); if (!P) continue;
+      const r = paraLayoutOf(an, P, e);
+      for (const sl of r.slots) if (sl.ph) inPara.set(sl.ph.key, { e, r, sl });
+    }
     const out = [];
     for (const ph of an.phrases) {
+      const x = inPara.get(ph.key);
+      if (x) {
+        if (x.sl.toks.length) out.push({ ph, edit: x.e, text: x.sl.text, box: x.sl.box, lay: x.sl.changed ? x.sl.lay : null });
+        const ls = x.r.para.lines;
+        if (ph === ls[ls.length - 1]) for (const sl of x.r.slots) if (sl.virtual && sl.toks.length) out.push({ ph: sl.vph, edit: x.e, text: sl.text, box: sl.box, lay: sl.lay });
+        continue;
+      }
       const e = byKey.get(ph.key);
       if (e && phraseOfEdit(an, e) === ph) {
         if (!e.text.length) continue;
@@ -1119,6 +1769,12 @@ const KamContent = (() => {
     await KamFonts.ready();
     const lays = [];
     for (const e of edits) {
+      if (!e.removeOnly && e.src && e.src.para) {
+        const P = paraOfEdit(an, e);
+        if (!P) { console.warn('a paragraph edit no longer matches its page and was skipped', e); continue; }
+        lays.push(...(await paraLayoutReady(an, P, e.text)).lays);
+        continue;
+      }
       const ph = e.removeOnly ? an.byKey.get(e.key) : phraseOfEdit(an, e);
       if (!ph) { console.warn('an edit no longer matches its page and was skipped', e); continue; }
       lays.push(await layoutReady(an, ph, e.removeOnly ? '' : e.text));
@@ -1231,7 +1887,7 @@ const KamContent = (() => {
   }
 
   return { analyse, cached, reset, current, phraseAt, layout, layoutReady, layoutOf, phraseOfEdit, drawLayout, applyEdits, editsOf, uniText,
-           newEdit, boxFields, pruneUnreachable, _internal: { Lexer, readPage, pdfjsShows, fingerprint, pageContent, mul, inv, pt } };
+           newEdit, boxFields, pruneUnreachable, unitOf, layoutPara, paraLayoutReady, paraLayoutOf, paraOfEdit, newParaEdit, _internal: { Lexer, readPage, pdfjsShows, fingerprint, pageContent, mul, inv, pt } };
 })();
 
 /* ---------- pages drawn with their edits applied ----------
@@ -1254,8 +1910,9 @@ const KamPatch = (() => {
     const id = state.pageIds[i];
     const edits = (state.annots[id] || []).filter(a => a.type === 'textedit' && !a.hidden);
     const sess = typeof KamEdit !== 'undefined' ? KamEdit.sessionFor(i) : null;
-    const list = edits.filter(e => !sess || e.src.key !== sess);
-    if (sess) list.push({ removeOnly: true, key: sess });
+    const inSession = e => !!sess && (sess.includes(e.src.key) || (!!e.src.para && e.src.para.lines.some(l => sess.includes(l.key))));
+    const list = edits.filter(e => !inSession(e));
+    if (sess) for (const key of sess) list.push({ removeOnly: true, key });
     const out = await PDFLib.PDFDocument.create({ updateMetadata: false });
     const [p] = await out.copyPages(state.doc, [i]);
     out.addPage(p);

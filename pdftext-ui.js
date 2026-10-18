@@ -244,7 +244,16 @@
       pushAnnotUndo(pageId);
       const list = state.annots[pageId] || (state.annots[pageId] = []);
       let e = t.item.edit ? list.find(a => a.id === t.item.edit.id) : null;
-      if (e) e.text = '';
+      if (e && e.src.para) {
+        // a line of a paragraph already edited: its words go, and the paragraph closes up
+        const P = KamContent.paraOfEdit(an, e), r = P && KamContent.layoutPara(an, P, e.text);
+        const sl = r && r.slots.find(x => x.toks.length && (x.ph === t.item.ph || x.vph === t.item.ph || (x.vph && t.item.ph.key === x.vph.key)));
+        if (sl) {
+          const head = e.text.slice(0, sl.range[0]).replace(/\s+$/, ''), tail = e.text.slice(sl.range[1]).replace(/^\s+/, '');
+          e.text = head && tail ? head + ' ' + tail : head + tail;
+        } else e.text = '';
+      }
+      else if (e) e.text = '';
       else { e = KamContent.newEdit(an, t.item.ph, ''); Object.assign(e, KamContent.boxFields(t.item.ph.box)); list.push(e); }
       picked = null; hover = null;
       drawOverlay(); refreshThumb(state.cur); updateProps();
@@ -350,8 +359,9 @@
     // While the page picture is being redrawn after an edit, the edits are drawn here so the
     // new words are there straight away.
     if (typeof KamPatch !== 'undefined' && KamView.canvasSig(pi) !== KamPatch.sigFor(pi)) {
-      const editingKey = KamEdit.sessionFor(pi);
-      for (const it of KamContent.current(pi)) if (it.edit && it.lay && it.ph.key !== editingKey) KamContent.drawLayout(ctx, s, it.lay);
+      const sess = KamEdit.sessionFor(pi) || [];
+      const editing = it => sess.includes(it.ph.key) || (!!it.edit.src.para && it.edit.src.para.lines.some(l => sess.includes(l.key)));
+      for (const it of KamContent.current(pi)) if (it.edit && it.lay && !editing(it)) KamContent.drawLayout(ctx, s, it.lay);
     }
     KamEdit.draw(ctx, s, pi);
     if (find.open && find.matches.length) {
